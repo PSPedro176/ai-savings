@@ -1,0 +1,23 @@
+resources:
+  jobs:
+    leaderboard:
+      name: aa-leaderboard-${bundle.target}
+
+      # Roda toda segunda às 8h; a lógica quinzenal (semanas alternadas) fica no notebook.
+      schedule:
+        quartz_cron_expression: '0 0 8 ? * MON'
+        timezone_id: America/Sao_Paulo
+        pause_status: UNPAUSED
+
+      tasks:
+        - task_key: refresh_leaderboard
+          # Sem cluster declarado => roda em compute serverless.
+          # Para usar cluster clássico, adicione um bloco new_cluster aqui.
+          notebook_task:
+            notebook_path: ../aa_leaderboard.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              table: ${var.table}
+              secret_scope: ${var.secret_scope}
+              secret_key: ${var.secret_key}

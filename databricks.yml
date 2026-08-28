@@ -1,0 +1,38 @@
+bundle:
+  name: ai_savings
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    description: Catálogo Unity Catalog de destino
+    default: main
+  schema:
+    description: Schema de destino
+    default: ai_savings
+  table:
+    description: Tabela do leaderboard
+    default: aa_leaderboard
+  secret_scope:
+    description: Secret scope com a chave da API Artificial Analysis
+    default: ai_savings
+  secret_key:
+    description: Chave (key) dentro do secret scope
+    default: aa_api_key
+
+targets:
+  dev:
+    default: true
+    mode: development
+    workspace:
+      # TODO: preencha com seu profile do ~/.databrickscfg
+      profile: DEFAULT
+
+  prod:
+    mode: production
+    workspace:
+      # TODO: preencha com seu profile de produção
+      profile: DEFAULT
+    variables:
+      schema: ai_savings
