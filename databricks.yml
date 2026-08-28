@@ -20,14 +20,18 @@ variables:
   secret_key:
     description: Chave (key) dentro do secret scope
     default: aa_api_key
+  warehouse_id:
+    description: SQL Warehouse que executa o dashboard AI Savings
+    default: 8edbc02ddff2de2d
 
 targets:
   dev:
     default: true
     mode: development
     workspace:
-      # TODO: preencha com seu profile do ~/.databrickscfg
-      profile: DEFAULT
+      profile: perdomo
+    variables:
+      catalog: perdomo_demos_catalog
 
   prod:
     mode: production
@@ -35,4 +39,5 @@ targets:
       # TODO: preencha com seu profile de produção
       profile: DEFAULT
     variables:
+      catalog: perdomo_demos_catalog
       schema: ai_savings
