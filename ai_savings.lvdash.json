@@ -274,6 +274,99 @@
         "WHERE workspace_id IS NOT NULL ",
         "ORDER BY workspace_id "
       ]
+    },
+    {
+      "name": "ds_harness",
+      "displayName": "Consumo em dólares por harness",
+      "queryLines": [
+        "WITH scoped AS ( ",
+        "  SELECT * FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily ",
+        "  WHERE (size(:param_workspace) = 0 OR array_contains(:param_workspace, workspace_id)) ",
+        "), ",
+        "base AS ( ",
+        "  SELECT event_date, workspace_id, endpoint_name, destination_model, SUM(cost_usd) AS cost_usd ",
+        "  FROM scoped ",
+        "  WHERE event_date BETWEEN :date_range.min AND :date_range.max ",
+        "    AND (size(:param_models) = 0 OR array_contains(:param_models, destination_model)) ",
+        "  GROUP BY 1, 2, 3, 4 ",
+        "), ",
+        "harness AS ( ",
+        "  SELECT DATE(event_time) AS event_date, CAST(workspace_id AS STRING) AS workspace_id, endpoint_name, ",
+        "         LOWER(REGEXP_REPLACE(destination_model, '[ .]+', '-')) AS destination_model, ",
+        "         CASE ",
+        "           WHEN url LIKE '%/cursor/v1/chat/completions%' THEN 'Cursor' ",
+        "           WHEN lower(user_agent) LIKE '%claude%' THEN 'Claude Code' ",
+        "           WHEN lower(user_agent) LIKE '%gemini%' THEN 'Gemini CLI' ",
+        "           WHEN lower(user_agent) LIKE '%codex%' THEN 'Codex CLI' ",
+        "           WHEN lower(user_agent) LIKE '%opencode%' THEN 'OpenCode' ",
+        "           WHEN lower(user_agent) LIKE 'pi/%' THEN 'Pi' ",
+        "           WHEN lower(user_agent) LIKE '%copilot%' THEN 'Github Copilot' ",
+        "           ELSE 'Outros / API direta' ",
+        "         END AS harness, ",
+        "         SUM(total_tokens) AS htok ",
+        "  FROM system.ai_gateway.usage ",
+        "  WHERE destination_model IS NOT NULL ",
+        "    AND (invocation_metadata.source != 'AI_QUERY' OR invocation_metadata.source IS NULL) ",
+        "    AND (service_type != 'MCP_SERVICE' OR service_type IS NULL) ",
+        "  GROUP BY 1, 2, 3, 4, 5 ",
+        "), ",
+        "grp AS ( ",
+        "  SELECT event_date, workspace_id, endpoint_name, destination_model, SUM(htok) AS mtok ",
+        "  FROM harness GROUP BY 1, 2, 3, 4 ",
+        ") ",
+        "SELECT h.harness, ",
+        "       CAST(SUM(CAST(base.cost_usd AS DOUBLE) * h.htok / NULLIF(g.mtok, 0)) AS DECIMAL(38,2)) AS cost_usd ",
+        "FROM base ",
+        "JOIN harness h ON base.event_date = h.event_date AND base.workspace_id = h.workspace_id ",
+        "  AND base.endpoint_name = h.endpoint_name AND base.destination_model = h.destination_model ",
+        "JOIN grp g ON base.event_date = g.event_date AND base.workspace_id = g.workspace_id ",
+        "  AND base.endpoint_name = g.endpoint_name AND base.destination_model = g.destination_model ",
+        "GROUP BY h.harness ",
+        "ORDER BY cost_usd DESC "
+      ],
+      "parameters": [
+        {
+          "keyword": "date_range",
+          "displayName": "date_range",
+          "dataType": "DATE",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATE",
+              "min": {
+                "value": "now-30d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        },
+        {
+          "keyword": "param_workspace",
+          "displayName": "param_workspace",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": []
+            }
+          }
+        },
+        {
+          "keyword": "param_models",
+          "displayName": "param_models",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": []
+            }
+          }
+        }
+      ]
     }
   ],
   "pages": [
@@ -357,6 +450,19 @@
                   ],
                   "disaggregated": false
                 }
+              },
+              {
+                "name": "p_dr_harness",
+                "query": {
+                  "datasetName": "ds_harness",
+                  "parameters": [
+                    {
+                      "name": "date_range",
+                      "keyword": "date_range"
+                    }
+                  ],
+                  "disaggregated": false
+                }
               }
             ],
             "spec": {
@@ -375,6 +481,10 @@
                   {
                     "parameterName": "date_range",
                     "queryName": "p_dr_compare"
+                  },
+                  {
+                    "parameterName": "date_range",
+                    "queryName": "p_dr_harness"
                   }
                 ]
               },
@@ -446,6 +556,19 @@
                   ],
                   "disaggregated": false
                 }
+              },
+              {
+                "name": "p_ws_harness",
+                "query": {
+                  "datasetName": "ds_harness",
+                  "parameters": [
+                    {
+                      "name": "param_workspace",
+                      "keyword": "param_workspace"
+                    }
+                  ],
+                  "disaggregated": false
+                }
               }
             ],
             "spec": {
@@ -469,6 +592,10 @@
                     "fieldName": "workspace_id",
                     "displayName": "Workspace",
                     "queryName": "v_ws"
+                  },
+                  {
+                    "parameterName": "param_workspace",
+                    "queryName": "p_ws_harness"
                   }
                 ]
               },
@@ -540,6 +667,19 @@
                   ],
                   "disaggregated": false
                 }
+              },
+              {
+                "name": "p_m_harness",
+                "query": {
+                  "datasetName": "ds_harness",
+                  "parameters": [
+                    {
+                      "name": "param_models",
+                      "keyword": "param_models"
+                    }
+                  ],
+                  "disaggregated": false
+                }
               }
             ],
             "spec": {
@@ -563,6 +703,10 @@
                     "fieldName": "destination_model",
                     "displayName": "Modelos usados",
                     "queryName": "v_m"
+                  },
+                  {
+                    "parameterName": "param_models",
+                    "queryName": "p_m_harness"
                   }
                 ]
               },
@@ -1149,6 +1293,98 @@
           "position": {
             "x": 0,
             "y": 8,
+            "width": 12,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "hdr_harness",
+            "multilineTextboxSpec": {
+              "lines": [
+                "### Consumo em dólares por harness (rateado por participação de tokens)"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 27,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "chart_harness",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_harness",
+                  "fields": [
+                    {
+                      "name": "harness",
+                      "expression": "`harness`"
+                    },
+                    {
+                      "name": "sum(cost_usd)",
+                      "expression": "SUM(`cost_usd`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "harness",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "value"
+                    }
+                  },
+                  "displayName": "Harness"
+                },
+                "y": {
+                  "fieldName": "sum(cost_usd)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Custo no período (USD)",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  }
+                },
+                "color": {
+                  "fieldName": "harness",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Harness"
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Consumo em dólares por harness"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 28,
             "width": 12,
             "height": 6
           }
