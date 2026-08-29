@@ -24,20 +24,6 @@ api_key = dbutils.secrets.get(dbutils.widgets.get("secret_scope"), dbutils.widge
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC ## Execução quinzenal
-# MAGIC O job roda toda segunda às 8h; aqui pulamos as semanas alternadas para virar
-# MAGIC quinzenal (semanas ISO pares). Remova esta célula se quiser rodar toda segunda.
-
-# COMMAND ----------
-
-import datetime
-
-if datetime.date.today().isocalendar().week % 2 != 0:
-    dbutils.notebook.exit("Semana ímpar — execução quinzenal pulada.")
-
-# COMMAND ----------
-
 import json
 import time
 import urllib.request
@@ -115,11 +101,18 @@ for m in fetch_models(api_key):
     rows.append({
         "provider": get(m, "model_creator", "name", default="?"),
         "model": get(m, "name", default=get(m, "slug", default="?")),
+        "slug": get(m, "slug"),
         "intelligence": num(intel),
         "tokens_per_s": num(tps),
         "ttft_s": num(get(m, "performance", "median_time_to_first_token_seconds")),
         "e2e_s": num(get(m, "performance", "median_end_to_end_response_time_seconds")),
+        # Preços por 1M tokens (base do de-para de custo da fase 2).
+        "price_input": num(get(m, "pricing", "price_1m_input_tokens")),
+        "price_output": num(get(m, "pricing", "price_1m_output_tokens")),
         "blended_price": num(price),
+        # Objeto pricing cru: garante que preços de cache (nome de campo não
+        # documentado) fiquem preservados para parsing posterior.
+        "pricing_json": json.dumps(get(m, "pricing", default={}) or {}),
         "cost_per_task": num(get(m, "artificial_analysis_intelligence_index_cost",
                                   "cost_per_task", "total_cost")),
         "cost_score": bucket(price, PRICE_TH),
@@ -138,11 +131,15 @@ from pyspark.sql.types import (DoubleType, LongType, StringType, StructField,
 SCHEMA = StructType([
     StructField("provider", StringType()),
     StructField("model", StringType()),
+    StructField("slug", StringType()),
     StructField("intelligence", DoubleType()),
     StructField("tokens_per_s", DoubleType()),
     StructField("ttft_s", DoubleType()),
     StructField("e2e_s", DoubleType()),
+    StructField("price_input", DoubleType()),
+    StructField("price_output", DoubleType()),
     StructField("blended_price", DoubleType()),
+    StructField("pricing_json", StringType()),
     StructField("cost_per_task", DoubleType()),
     StructField("cost_score", LongType()),
     StructField("perf_score", LongType()),

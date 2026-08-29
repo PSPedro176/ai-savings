@@ -4,9 +4,11 @@ Estima a **economia potencial em IA** de um cliente Databricks: compara o custo 
 consumo de LLMs (faturado pela Databricks) com o custo estimado se **os mesmos tokens do
 período rodassem em um único modelo**. Entrega um dashboard AI/BI sobre system tables.
 
-Inclui também um coletor quinzenal do leaderboard custo × performance da
-[Artificial Analysis](https://artificialanalysis.ai) (histórico em tabela Delta), pensado
-como base para evoluções futuras.
+Inclui também um coletor semanal (segundas) do leaderboard da
+[Artificial Analysis](https://artificialanalysis.ai) — performance (intelligence index),
+velocidade e **preços por 1M tokens (input/output + objeto `pricing` cru p/ cache)**,
+guardados como snapshots em tabela Delta. É a base do de-para de performance/custo da
+**fase 2** (estimar quanto o cliente pagaria indo direto num único provider).
 
 ## Estrutura
 
@@ -19,7 +21,7 @@ como base para evoluções futuras.
 │   └── v_model_usage_daily.sql   # view: fato diário por modelo (custo real + tokens)
 └── resources/
     ├── dashboard.yml         # recurso DABs do dashboard
-    └── leaderboard.job.yml   # job quinzenal do leaderboard
+    └── leaderboard.job.yml   # job semanal do leaderboard
 ```
 
 ## Como funciona a estimativa
@@ -67,12 +69,30 @@ como base para evoluções futuras.
    > `ddl/v_model_usage_daily.sql` **e** nos datasets do `ai_savings.lvdash.json` (o DABs não
    > faz substituição de variável dentro do JSON do dashboard).
 
-3. (Opcional, para o leaderboard) criar o secret com a chave da API:
+3. Salvar a chave da API da Artificial Analysis num secret do Databricks (necessário para o
+   coletor). Copie e cole, trocando `<PROFILE>` pelo seu profile — o segundo comando abre um
+   prompt para você colar a chave:
 
    ```bash
    databricks secrets create-scope ai_savings --profile <PROFILE>
    databricks secrets put-secret ai_savings aa_api_key --profile <PROFILE>
    ```
+
+   > Os nomes `ai_savings` (scope) e `aa_api_key` (key) batem com os defaults
+   > `secret_scope` / `secret_key` do `databricks.yml`. Se mudar, ajuste lá também.
+
+   Alternativa: criar o secret de dentro de um **notebook Python** no Databricks, via SDK
+   (`dbutils.secrets` só *lê* segredos — a criação é pelo SDK/API):
+
+   ```python
+   from databricks.sdk import WorkspaceClient
+
+   w = WorkspaceClient()
+   w.secrets.create_scope(scope="ai_savings")  # ignore o erro se o scope já existir
+   w.secrets.put_secret(scope="ai_savings", key="aa_api_key", string_value="<SUA_API_KEY>")
+   ```
+
+   > Não faça commit da chave. Rode a célula uma vez e limpe o output/valor depois.
 
 ## Deploy
 

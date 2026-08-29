@@ -3,7 +3,7 @@ resources:
     leaderboard:
       name: aa-leaderboard-${bundle.target}
 
-      # Roda toda segunda às 8h; a lógica quinzenal (semanas alternadas) fica no notebook.
+      # Roda toda segunda às 8h (semanal).
       schedule:
         quartz_cron_expression: '0 0 8 ? * MON'
         timezone_id: America/Sao_Paulo

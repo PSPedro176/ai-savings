@@ -367,6 +367,134 @@
           }
         }
       ]
+    },
+    {
+      "name": "ds_provider_sim",
+      "displayName": "Simulação por provider único (preço direto)",
+      "queryLines": [
+        "WITH ref AS (SELECT * FROM perdomo_demos_catalog.ai_savings.v_aa_model_ref), ",
+        "real AS ( ",
+        "  SELECT destination_model, SUM(input_tokens) inp, SUM(output_tokens) outp, ",
+        "         SUM(cache_read_input_tokens) cread, SUM(cache_creation_input_tokens) cwrite ",
+        "  FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily ",
+        "  WHERE (size(:param_workspace) = 0 OR array_contains(:param_workspace, workspace_id)) ",
+        "    AND event_date BETWEEN :date_range.min AND :date_range.max ",
+        "    AND (size(:param_models) = 0 OR array_contains(:param_models, destination_model)) ",
+        "  GROUP BY 1 ",
+        "), ",
+        "real_aa AS ( ",
+        "  SELECT r.*, ref.intelligence r_intel, ref.price_input rp_in, ref.price_output rp_out, ",
+        "         ref.price_cache_read rp_cr, ref.price_cache_write rp_cw ",
+        "  FROM real r JOIN ref ON r.destination_model = ref.slug_norm ",
+        "), ",
+        "base AS ( ",
+        "  SELECT '0 · Mix atual (direto)' AS scenario, ",
+        "         SUM((GREATEST(inp - cread - cwrite, 0) * rp_in + cread * COALESCE(rp_cr, rp_in) ",
+        "              + cwrite * COALESCE(rp_cw, rp_in) + outp * rp_out) / 1e6) AS cost_usd ",
+        "  FROM real_aa ",
+        "), ",
+        "cand AS ( ",
+        "  SELECT ra.destination_model, ra.inp, ra.outp, ra.cread, ra.cwrite, ep.provider target_provider, ",
+        "         ep.price_input, ep.price_output, ep.price_cache_read pcr, ep.price_cache_write pcw, ",
+        "         ROW_NUMBER() OVER (PARTITION BY ra.destination_model, ep.provider ",
+        "                            ORDER BY ABS(ep.intelligence - ra.r_intel), ep.intelligence DESC) rn ",
+        "  FROM real_aa ra JOIN ref ep ON TRUE ",
+        "), ",
+        "per_prov AS ( ",
+        "  SELECT concat('Só ', target_provider) AS scenario, target_provider, ",
+        "         SUM((GREATEST(inp - cread - cwrite, 0) * price_input + cread * COALESCE(pcr, price_input) ",
+        "              + cwrite * COALESCE(pcw, price_input) + outp * price_output) / 1e6) AS cost_usd ",
+        "  FROM cand WHERE rn = 1 GROUP BY target_provider ",
+        ") ",
+        "SELECT scenario, CAST(cost_usd AS DECIMAL(38,2)) AS cost_usd FROM base ",
+        "UNION ALL ",
+        "SELECT scenario, CAST(cost_usd AS DECIMAL(38,2)) AS cost_usd FROM per_prov ",
+        "WHERE array_contains(:param_sim_providers, target_provider) ",
+        "ORDER BY cost_usd DESC "
+      ],
+      "parameters": [
+        {
+          "keyword": "date_range",
+          "displayName": "date_range",
+          "dataType": "DATE",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATE",
+              "min": {
+                "value": "now-30d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        },
+        {
+          "keyword": "param_workspace",
+          "displayName": "param_workspace",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": []
+            }
+          }
+        },
+        {
+          "keyword": "param_models",
+          "displayName": "param_models",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": []
+            }
+          }
+        },
+        {
+          "keyword": "param_sim_providers",
+          "displayName": "param_sim_providers",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "OpenAI"
+                },
+                {
+                  "value": "Anthropic"
+                },
+                {
+                  "value": "Google"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "ds_dim_providers",
+      "displayName": "Providers disponíveis (AA)",
+      "queryLines": [
+        "SELECT DISTINCT provider FROM perdomo_demos_catalog.ai_savings.v_aa_model_ref ",
+        "WHERE provider IS NOT NULL ORDER BY provider "
+      ]
+    },
+    {
+      "name": "ds_dim_models_cmp",
+      "displayName": "Modelos disponíveis (comparar)",
+      "queryLines": [
+        "SELECT DISTINCT destination_model ",
+        "FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily ",
+        "WHERE destination_model IS NOT NULL ",
+        "ORDER BY destination_model "
+      ]
     }
   ],
   "pages": [
@@ -463,6 +591,19 @@
                   ],
                   "disaggregated": false
                 }
+              },
+              {
+                "name": "p_dr_prov",
+                "query": {
+                  "datasetName": "ds_provider_sim",
+                  "parameters": [
+                    {
+                      "name": "date_range",
+                      "keyword": "date_range"
+                    }
+                  ],
+                  "disaggregated": false
+                }
               }
             ],
             "spec": {
@@ -485,6 +626,10 @@
                   {
                     "parameterName": "date_range",
                     "queryName": "p_dr_harness"
+                  },
+                  {
+                    "parameterName": "date_range",
+                    "queryName": "p_dr_prov"
                   }
                 ]
               },
@@ -569,6 +714,19 @@
                   ],
                   "disaggregated": false
                 }
+              },
+              {
+                "name": "p_ws_prov",
+                "query": {
+                  "datasetName": "ds_provider_sim",
+                  "parameters": [
+                    {
+                      "name": "param_workspace",
+                      "keyword": "param_workspace"
+                    }
+                  ],
+                  "disaggregated": false
+                }
               }
             ],
             "spec": {
@@ -596,6 +754,10 @@
                   {
                     "parameterName": "param_workspace",
                     "queryName": "p_ws_harness"
+                  },
+                  {
+                    "parameterName": "param_workspace",
+                    "queryName": "p_ws_prov"
                   }
                 ]
               },
@@ -680,6 +842,19 @@
                   ],
                   "disaggregated": false
                 }
+              },
+              {
+                "name": "p_m_prov",
+                "query": {
+                  "datasetName": "ds_provider_sim",
+                  "parameters": [
+                    {
+                      "name": "param_models",
+                      "keyword": "param_models"
+                    }
+                  ],
+                  "disaggregated": false
+                }
               }
             ],
             "spec": {
@@ -707,6 +882,10 @@
                   {
                     "parameterName": "param_models",
                     "queryName": "p_m_harness"
+                  },
+                  {
+                    "parameterName": "param_models",
+                    "queryName": "p_m_prov"
                   }
                 ]
               },
@@ -820,7 +999,7 @@
               {
                 "name": "v_cm",
                 "query": {
-                  "datasetName": "ds_dim_models",
+                  "datasetName": "ds_dim_models_cmp",
                   "fields": [
                     {
                       "name": "destination_model",
@@ -1385,6 +1564,176 @@
           "position": {
             "x": 0,
             "y": 28,
+            "width": 12,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "hdr_provider",
+            "multilineTextboxSpec": {
+              "lines": [
+                "### Quanto pagaria indo DIRETO num provider único (de-para por performance da Artificial Analysis)"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 34,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "filter_providers",
+            "queries": [
+              {
+                "name": "v_prov",
+                "query": {
+                  "datasetName": "ds_dim_providers",
+                  "fields": [
+                    {
+                      "name": "provider",
+                      "expression": "`provider`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "p_pv_prov",
+                "query": {
+                  "datasetName": "ds_provider_sim",
+                  "parameters": [
+                    {
+                      "name": "param_sim_providers",
+                      "keyword": "param_sim_providers"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "parameterName": "param_sim_providers",
+                    "queryName": "p_pv_prov"
+                  },
+                  {
+                    "fieldName": "provider",
+                    "displayName": "Providers p/ simular",
+                    "queryName": "v_prov"
+                  }
+                ]
+              },
+              "selection": {
+                "defaultSelection": {
+                  "values": {
+                    "dataType": "STRING",
+                    "values": [
+                      {
+                        "value": "OpenAI"
+                      },
+                      {
+                        "value": "Anthropic"
+                      },
+                      {
+                        "value": "Google"
+                      }
+                    ]
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Providers p/ simular (direto)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 35,
+            "width": 12,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "chart_provider",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_provider_sim",
+                  "fields": [
+                    {
+                      "name": "scenario",
+                      "expression": "`scenario`"
+                    },
+                    {
+                      "name": "sum(cost_usd)",
+                      "expression": "SUM(`cost_usd`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "scenario",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  },
+                  "displayName": "Cenário"
+                },
+                "y": {
+                  "fieldName": "sum(cost_usd)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Custo no período (USD, preço direto)",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  }
+                },
+                "color": {
+                  "fieldName": "scenario",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Cenário"
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Custo do período: mix atual vs. cada provider único (preço direto do provider)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 37,
             "width": 12,
             "height": 6
           }
