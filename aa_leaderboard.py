@@ -157,5 +157,27 @@ print(f"Snapshot de {len(rows)} modelos inserido em {target_table}")
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Sinaliza se as views precisam ser criadas
+# MAGIC Seta um task value lido pela condition task do job: as tasks de DDL só rodam
+# MAGIC quando alguma das views ainda não existe (primeira execução após o deploy).
+
+# COMMAND ----------
+
+REQUIRED_VIEWS = {"v_model_usage_daily", "v_aa_model_ref"}
+existing_views = {
+    r.viewName for r in spark.sql(f"SHOW VIEWS IN {catalog}.{schema}").collect()
+}
+create_needed = "true" if not REQUIRED_VIEWS <= existing_views else "false"
+
+try:
+    dbutils.jobs.taskValues.set(key="create_needed", value=create_needed)
+except Exception:
+    pass  # fora de um job (execução interativa) — task values não se aplicam
+
+print(f"create_needed = {create_needed}")
+
+# COMMAND ----------
+
 # Ordenado: melhor performance primeiro; empate desempata por menor custo.
 display(df.orderBy(df.perf_score.desc(), df.cost_score.asc()))
