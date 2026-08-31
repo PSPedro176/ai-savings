@@ -26,7 +26,9 @@ SELECT
   price_input,
   price_output,
   CAST(get_json_object(pricing_json, '$.price_1m_cache_hit_tokens')   AS DOUBLE) AS price_cache_read,
-  CAST(get_json_object(pricing_json, '$.price_1m_cache_write_tokens') AS DOUBLE) AS price_cache_write
+  CAST(get_json_object(pricing_json, '$.price_1m_cache_write_tokens') AS DOUBLE) AS price_cache_write,
+  blended_price,
+  tokens_per_s
 FROM latest
 WHERE intelligence IS NOT NULL
   AND price_input IS NOT NULL

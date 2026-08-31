@@ -186,20 +186,6 @@
       ]
     },
     {
-      "name": "ds_dim_models",
-      "displayName": "Modelos disponíveis",
-      "queryLines": [
-        "SELECT DISTINCT destination_model FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily WHERE destination_model IS NOT NULL ORDER BY destination_model "
-      ]
-    },
-    {
-      "name": "ds_dim_workspaces",
-      "displayName": "Workspaces disponíveis",
-      "queryLines": [
-        "SELECT DISTINCT workspace_id FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily WHERE workspace_id IS NOT NULL ORDER BY workspace_id "
-      ]
-    },
-    {
       "name": "ds_harness",
       "displayName": "Consumo em dólares por harness",
       "queryLines": [
@@ -318,76 +304,252 @@
       ]
     },
     {
+      "name": "ds_provider_kpis",
+      "displayName": "Provider único — cards",
+      "queryLines": [
+        "WITH ref AS (SELECT * FROM perdomo_demos_catalog.ai_savings.v_aa_model_ref), ",
+        "real AS ( ",
+        "  SELECT event_date, destination_model, SUM(input_tokens) inp, SUM(output_tokens) outp, ",
+        "         SUM(cache_read_input_tokens) cread, SUM(cache_creation_input_tokens) cwrite ",
+        "  FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily ",
+        "  WHERE (size(:param_workspace) = 0 OR array_contains(:param_workspace, workspace_id)) ",
+        "    AND event_date BETWEEN :date_range.min AND :date_range.max ",
+        "    AND (size(:param_models) = 0 OR array_contains(:param_models, destination_model)) ",
+        "  GROUP BY 1, 2 ",
+        "), ",
+        "ra AS (SELECT r.*, ref.intelligence ri, ref.price_input pin, ref.price_output pout, ",
+        "              ref.price_cache_read pcr, ref.price_cache_write pcw ",
+        "       FROM real r JOIN ref ON r.destination_model = ref.slug_norm), ",
+        "equiv AS (SELECT destination_model, pi, po, pcr2, pcw2 FROM ( ",
+        "    SELECT m.destination_model, ep.price_input pi, ep.price_output po, ",
+        "           ep.price_cache_read pcr2, ep.price_cache_write pcw2, ",
+        "           ROW_NUMBER() OVER (PARTITION BY m.destination_model ",
+        "                              ORDER BY ABS(ep.intelligence - m.ri), ep.intelligence DESC) rn ",
+        "    FROM (SELECT DISTINCT destination_model, ri FROM ra) m ",
+        "    JOIN ref ep ON ep.provider = :param_sim_provider) WHERE rn = 1) ",
+        ", dm AS (SELECT ra.destination_model, ",
+        "   (GREATEST(inp-cread-cwrite,0)*pin + cread*COALESCE(pcr,pin) + cwrite*COALESCE(pcw,pin) + outp*pout)/1e6 rc, ",
+        "   (GREATEST(inp-cread-cwrite,0)*e.pi + cread*COALESCE(e.pcr2,e.pi) + cwrite*COALESCE(e.pcw2,e.pi) + outp*e.po)/1e6 sc ",
+        "   FROM ra JOIN equiv e USING (destination_model)) ",
+        "SELECT CAST(SUM(rc) AS DECIMAL(38,2)) AS real_cost, ",
+        "       CAST(SUM(sc) AS DECIMAL(38,2)) AS sim_cost, ",
+        "       CAST(SUM(sc) - SUM(rc) AS DECIMAL(38,2)) AS savings FROM dm "
+      ],
+      "parameters": [
+        {
+          "keyword": "date_range",
+          "displayName": "date_range",
+          "dataType": "DATE",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATE",
+              "min": {
+                "value": "now-30d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        },
+        {
+          "keyword": "param_workspace",
+          "displayName": "param_workspace",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": []
+            }
+          }
+        },
+        {
+          "keyword": "param_models",
+          "displayName": "param_models",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": []
+            }
+          }
+        },
+        {
+          "keyword": "param_sim_provider",
+          "displayName": "param_sim_provider",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "OpenAI"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "ds_provider_daily",
+      "displayName": "Provider único — diário",
+      "queryLines": [
+        "WITH ref AS (SELECT * FROM perdomo_demos_catalog.ai_savings.v_aa_model_ref), ",
+        "real AS ( ",
+        "  SELECT event_date, destination_model, SUM(input_tokens) inp, SUM(output_tokens) outp, ",
+        "         SUM(cache_read_input_tokens) cread, SUM(cache_creation_input_tokens) cwrite ",
+        "  FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily ",
+        "  WHERE (size(:param_workspace) = 0 OR array_contains(:param_workspace, workspace_id)) ",
+        "    AND event_date BETWEEN :date_range.min AND :date_range.max ",
+        "    AND (size(:param_models) = 0 OR array_contains(:param_models, destination_model)) ",
+        "  GROUP BY 1, 2 ",
+        "), ",
+        "ra AS (SELECT r.*, ref.intelligence ri, ref.price_input pin, ref.price_output pout, ",
+        "              ref.price_cache_read pcr, ref.price_cache_write pcw ",
+        "       FROM real r JOIN ref ON r.destination_model = ref.slug_norm), ",
+        "equiv AS (SELECT destination_model, pi, po, pcr2, pcw2 FROM ( ",
+        "    SELECT m.destination_model, ep.price_input pi, ep.price_output po, ",
+        "           ep.price_cache_read pcr2, ep.price_cache_write pcw2, ",
+        "           ROW_NUMBER() OVER (PARTITION BY m.destination_model ",
+        "                              ORDER BY ABS(ep.intelligence - m.ri), ep.intelligence DESC) rn ",
+        "    FROM (SELECT DISTINCT destination_model, ri FROM ra) m ",
+        "    JOIN ref ep ON ep.provider = :param_sim_provider) WHERE rn = 1) ",
+        ", dm AS (SELECT ra.event_date, ra.destination_model, ",
+        "   CAST((GREATEST(inp-cread-cwrite,0)*pin + cread*COALESCE(pcr,pin) + cwrite*COALESCE(pcw,pin) + outp*pout)/1e6 AS DECIMAL(38,2)) cost_usd, ",
+        "   (GREATEST(inp-cread-cwrite,0)*e.pi + cread*COALESCE(e.pcr2,e.pi) + cwrite*COALESCE(e.pcw2,e.pi) + outp*e.po)/1e6 sc ",
+        "   FROM ra JOIN equiv e USING (destination_model)), ",
+        "daily_sim AS (SELECT event_date, SUM(sc) day_sim FROM dm GROUP BY 1) ",
+        "SELECT dm.event_date, dm.destination_model, dm.cost_usd, ",
+        "       CAST(ds.day_sim AS DECIMAL(38,2)) AS sim_cost_usd ",
+        "FROM dm JOIN daily_sim ds USING (event_date) ORDER BY dm.event_date "
+      ],
+      "parameters": [
+        {
+          "keyword": "date_range",
+          "displayName": "date_range",
+          "dataType": "DATE",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATE",
+              "min": {
+                "value": "now-30d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        },
+        {
+          "keyword": "param_workspace",
+          "displayName": "param_workspace",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": []
+            }
+          }
+        },
+        {
+          "keyword": "param_models",
+          "displayName": "param_models",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": []
+            }
+          }
+        },
+        {
+          "keyword": "param_sim_provider",
+          "displayName": "param_sim_provider",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "OpenAI"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "ds_aa_table",
+      "displayName": "Artificial Analysis — modelos",
+      "queryLines": [
+        "SELECT provider, model, intelligence, blended_price, tokens_per_s ",
+        "FROM perdomo_demos_catalog.ai_savings.v_aa_model_ref ORDER BY intelligence DESC "
+      ]
+    },
+    {
+      "name": "ds_dim_models",
+      "displayName": "ds_dim_models",
+      "queryLines": [
+        "SELECT DISTINCT destination_model FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily WHERE destination_model IS NOT NULL ORDER BY destination_model "
+      ]
+    },
+    {
+      "name": "ds_dim_models_sim",
+      "displayName": "ds_dim_models_sim",
+      "queryLines": [
+        "SELECT DISTINCT destination_model FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily WHERE destination_model IS NOT NULL ORDER BY destination_model "
+      ]
+    },
+    {
+      "name": "ds_dim_models_cmp",
+      "displayName": "ds_dim_models_cmp",
+      "queryLines": [
+        "SELECT DISTINCT destination_model FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily WHERE destination_model IS NOT NULL ORDER BY destination_model "
+      ]
+    },
+    {
+      "name": "ds_dim_workspaces",
+      "displayName": "ds_dim_workspaces",
+      "queryLines": [
+        "SELECT DISTINCT workspace_id FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily WHERE workspace_id IS NOT NULL ORDER BY workspace_id "
+      ]
+    },
+    {
       "name": "ds_dim_providers",
-      "displayName": "Providers disponíveis (AA)",
+      "displayName": "ds_dim_providers",
       "queryLines": [
         "SELECT DISTINCT provider FROM perdomo_demos_catalog.ai_savings.v_aa_model_ref WHERE provider IS NOT NULL ORDER BY provider "
       ]
     },
     {
-      "name": "ds_dim_models_cmp",
-      "displayName": "Modelos disponíveis (comparar)",
+      "name": "ds_dim_providers_sim",
+      "displayName": "ds_dim_providers_sim",
       "queryLines": [
-        "SELECT DISTINCT destination_model FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily WHERE destination_model IS NOT NULL ORDER BY destination_model "
+        "SELECT DISTINCT provider FROM perdomo_demos_catalog.ai_savings.v_aa_model_ref WHERE provider IS NOT NULL ORDER BY provider "
       ]
     }
   ],
   "pages": [
     {
-      "name": "main",
-      "displayName": "AI Savings",
+      "name": "filtros",
+      "displayName": "Filtros",
+      "pageType": "PAGE_TYPE_GLOBAL_FILTERS",
+      "layoutVersion": "GRID_V1",
       "layout": [
-        {
-          "widget": {
-            "name": "title",
-            "multilineTextboxSpec": {
-              "lines": [
-                "## AI Savings — economia potencial com alternância inteligente entre agentes e modelos"
-              ]
-            }
-          },
-          "position": {
-            "x": 0,
-            "y": 0,
-            "width": 12,
-            "height": 1
-          }
-        },
-        {
-          "widget": {
-            "name": "subtitle",
-            "multilineTextboxSpec": {
-              "lines": [
-                "Compara o custo real (faturado Databricks) com o custo estimado se os mesmos tokens do período rodassem em um único modelo. Estimativa via custo efetivo agregado ($/token) de cada modelo — não separa input/output/cache."
-              ]
-            }
-          },
-          "position": {
-            "x": 0,
-            "y": 1,
-            "width": 12,
-            "height": 1
-          }
-        },
         {
           "widget": {
             "name": "filter_date",
             "queries": [
               {
-                "name": "parameter_dashboards/01f1a3b299c510ebaf75c10166c7b969/datasets/01f1a3b2f30d145da4a869f0da794e17_date_range",
-                "query": {
-                  "datasetName": "ds_usage_daily",
-                  "parameters": [
-                    {
-                      "name": "date_range",
-                      "keyword": "date_range"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              },
-              {
-                "name": "parameter_dashboards/01f1a3b299c510ebaf75c10166c7b969/datasets/01f1a3b2f30d1460b40e656fc2f93878_date_range",
+                "name": "dr_ds_kpis",
                 "query": {
                   "datasetName": "ds_kpis",
                   "parameters": [
@@ -400,7 +562,7 @@
                 }
               },
               {
-                "name": "parameter_dashboards/01f1a3b299c510ebaf75c10166c7b969/datasets/01f1a3b2f30d14619b37b48f4c6b55bf_date_range",
+                "name": "dr_ds_compare",
                 "query": {
                   "datasetName": "ds_compare",
                   "parameters": [
@@ -413,9 +575,9 @@
                 }
               },
               {
-                "name": "parameter_dashboards/01f1a3b299c510ebaf75c10166c7b969/datasets/01f1a3b2f30d146394236ed8497ce042_date_range",
+                "name": "dr_ds_usage_daily",
                 "query": {
-                  "datasetName": "ds_harness",
+                  "datasetName": "ds_usage_daily",
                   "parameters": [
                     {
                       "name": "date_range",
@@ -426,9 +588,48 @@
                 }
               },
               {
-                "name": "parameter_dashboards/01f1a3b299c510ebaf75c10166c7b969/datasets/01f1a3b2f30d146388923cd5abcd3a9e_date_range",
+                "name": "dr_ds_provider_kpis",
+                "query": {
+                  "datasetName": "ds_provider_kpis",
+                  "parameters": [
+                    {
+                      "name": "date_range",
+                      "keyword": "date_range"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "dr_ds_provider_sim",
                 "query": {
                   "datasetName": "ds_provider_sim",
+                  "parameters": [
+                    {
+                      "name": "date_range",
+                      "keyword": "date_range"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "dr_ds_provider_daily",
+                "query": {
+                  "datasetName": "ds_provider_daily",
+                  "parameters": [
+                    {
+                      "name": "date_range",
+                      "keyword": "date_range"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "dr_ds_harness",
+                "query": {
+                  "datasetName": "ds_harness",
                   "parameters": [
                     {
                       "name": "date_range",
@@ -441,44 +642,49 @@
             ],
             "spec": {
               "version": 2,
-              "frame": {
-                "showTitle": true,
-                "title": {
-                  "value": "Período",
-                  "fields": []
-                }
-              },
               "widgetType": "filter-date-range-picker",
               "encodings": {
                 "fields": [
                   {
                     "parameterName": "date_range",
-                    "queryName": "parameter_dashboards/01f1a3b299c510ebaf75c10166c7b969/datasets/01f1a3b2f30d145da4a869f0da794e17_date_range"
+                    "queryName": "dr_ds_kpis"
                   },
                   {
                     "parameterName": "date_range",
-                    "queryName": "parameter_dashboards/01f1a3b299c510ebaf75c10166c7b969/datasets/01f1a3b2f30d1460b40e656fc2f93878_date_range"
+                    "queryName": "dr_ds_compare"
                   },
                   {
                     "parameterName": "date_range",
-                    "queryName": "parameter_dashboards/01f1a3b299c510ebaf75c10166c7b969/datasets/01f1a3b2f30d14619b37b48f4c6b55bf_date_range"
+                    "queryName": "dr_ds_usage_daily"
                   },
                   {
                     "parameterName": "date_range",
-                    "queryName": "parameter_dashboards/01f1a3b299c510ebaf75c10166c7b969/datasets/01f1a3b2f30d146394236ed8497ce042_date_range"
+                    "queryName": "dr_ds_provider_kpis"
                   },
                   {
                     "parameterName": "date_range",
-                    "queryName": "parameter_dashboards/01f1a3b299c510ebaf75c10166c7b969/datasets/01f1a3b2f30d146388923cd5abcd3a9e_date_range"
+                    "queryName": "dr_ds_provider_sim"
+                  },
+                  {
+                    "parameterName": "date_range",
+                    "queryName": "dr_ds_provider_daily"
+                  },
+                  {
+                    "parameterName": "date_range",
+                    "queryName": "dr_ds_harness"
                   }
                 ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Período"
               }
             }
           },
           "position": {
             "x": 0,
-            "y": 2,
-            "width": 3,
+            "y": 0,
+            "width": 4,
             "height": 2
           }
         },
@@ -487,7 +693,7 @@
             "name": "filter_workspace",
             "queries": [
               {
-                "name": "v_ws",
+                "name": "v_filter_workspace",
                 "query": {
                   "datasetName": "ds_dim_workspaces",
                   "fields": [
@@ -500,20 +706,7 @@
                 }
               },
               {
-                "name": "p_ws_usage",
-                "query": {
-                  "datasetName": "ds_usage_daily",
-                  "parameters": [
-                    {
-                      "name": "param_workspace",
-                      "keyword": "param_workspace"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              },
-              {
-                "name": "p_ws_kpis",
+                "name": "p_filter_workspace_ds_kpis",
                 "query": {
                   "datasetName": "ds_kpis",
                   "parameters": [
@@ -526,7 +719,7 @@
                 }
               },
               {
-                "name": "p_ws_compare",
+                "name": "p_filter_workspace_ds_compare",
                 "query": {
                   "datasetName": "ds_compare",
                   "parameters": [
@@ -539,9 +732,9 @@
                 }
               },
               {
-                "name": "p_ws_harness",
+                "name": "p_filter_workspace_ds_usage_daily",
                 "query": {
-                  "datasetName": "ds_harness",
+                  "datasetName": "ds_usage_daily",
                   "parameters": [
                     {
                       "name": "param_workspace",
@@ -552,9 +745,48 @@
                 }
               },
               {
-                "name": "p_ws_prov",
+                "name": "p_filter_workspace_ds_provider_kpis",
+                "query": {
+                  "datasetName": "ds_provider_kpis",
+                  "parameters": [
+                    {
+                      "name": "param_workspace",
+                      "keyword": "param_workspace"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "p_filter_workspace_ds_provider_sim",
                 "query": {
                   "datasetName": "ds_provider_sim",
+                  "parameters": [
+                    {
+                      "name": "param_workspace",
+                      "keyword": "param_workspace"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "p_filter_workspace_ds_provider_daily",
+                "query": {
+                  "datasetName": "ds_provider_daily",
+                  "parameters": [
+                    {
+                      "name": "param_workspace",
+                      "keyword": "param_workspace"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "p_filter_workspace_ds_harness",
+                "query": {
+                  "datasetName": "ds_harness",
                   "parameters": [
                     {
                       "name": "param_workspace",
@@ -572,28 +804,36 @@
                 "fields": [
                   {
                     "parameterName": "param_workspace",
-                    "queryName": "p_ws_usage"
+                    "queryName": "p_filter_workspace_ds_kpis"
                   },
                   {
                     "parameterName": "param_workspace",
-                    "queryName": "p_ws_kpis"
+                    "queryName": "p_filter_workspace_ds_compare"
                   },
                   {
                     "parameterName": "param_workspace",
-                    "queryName": "p_ws_compare"
+                    "queryName": "p_filter_workspace_ds_usage_daily"
+                  },
+                  {
+                    "parameterName": "param_workspace",
+                    "queryName": "p_filter_workspace_ds_provider_kpis"
+                  },
+                  {
+                    "parameterName": "param_workspace",
+                    "queryName": "p_filter_workspace_ds_provider_sim"
+                  },
+                  {
+                    "parameterName": "param_workspace",
+                    "queryName": "p_filter_workspace_ds_provider_daily"
+                  },
+                  {
+                    "parameterName": "param_workspace",
+                    "queryName": "p_filter_workspace_ds_harness"
                   },
                   {
                     "fieldName": "workspace_id",
                     "displayName": "Workspace",
-                    "queryName": "v_ws"
-                  },
-                  {
-                    "parameterName": "param_workspace",
-                    "queryName": "p_ws_harness"
-                  },
-                  {
-                    "parameterName": "param_workspace",
-                    "queryName": "p_ws_prov"
+                    "queryName": "v_filter_workspace"
                   }
                 ]
               },
@@ -604,9 +844,9 @@
             }
           },
           "position": {
-            "x": 3,
-            "y": 2,
-            "width": 3,
+            "x": 4,
+            "y": 0,
+            "width": 4,
             "height": 2
           }
         },
@@ -615,7 +855,7 @@
             "name": "filter_models",
             "queries": [
               {
-                "name": "v_m",
+                "name": "v_filter_models",
                 "query": {
                   "datasetName": "ds_dim_models",
                   "fields": [
@@ -628,20 +868,7 @@
                 }
               },
               {
-                "name": "p_m_usage",
-                "query": {
-                  "datasetName": "ds_usage_daily",
-                  "parameters": [
-                    {
-                      "name": "param_models",
-                      "keyword": "param_models"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              },
-              {
-                "name": "p_m_kpis",
+                "name": "p_filter_models_ds_kpis",
                 "query": {
                   "datasetName": "ds_kpis",
                   "parameters": [
@@ -654,7 +881,7 @@
                 }
               },
               {
-                "name": "p_m_compare",
+                "name": "p_filter_models_ds_compare",
                 "query": {
                   "datasetName": "ds_compare",
                   "parameters": [
@@ -667,9 +894,9 @@
                 }
               },
               {
-                "name": "p_m_harness",
+                "name": "p_filter_models_ds_usage_daily",
                 "query": {
-                  "datasetName": "ds_harness",
+                  "datasetName": "ds_usage_daily",
                   "parameters": [
                     {
                       "name": "param_models",
@@ -680,9 +907,48 @@
                 }
               },
               {
-                "name": "p_m_prov",
+                "name": "p_filter_models_ds_provider_kpis",
+                "query": {
+                  "datasetName": "ds_provider_kpis",
+                  "parameters": [
+                    {
+                      "name": "param_models",
+                      "keyword": "param_models"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "p_filter_models_ds_provider_sim",
                 "query": {
                   "datasetName": "ds_provider_sim",
+                  "parameters": [
+                    {
+                      "name": "param_models",
+                      "keyword": "param_models"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "p_filter_models_ds_provider_daily",
+                "query": {
+                  "datasetName": "ds_provider_daily",
+                  "parameters": [
+                    {
+                      "name": "param_models",
+                      "keyword": "param_models"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "p_filter_models_ds_harness",
+                "query": {
+                  "datasetName": "ds_harness",
                   "parameters": [
                     {
                       "name": "param_models",
@@ -700,28 +966,36 @@
                 "fields": [
                   {
                     "parameterName": "param_models",
-                    "queryName": "p_m_usage"
+                    "queryName": "p_filter_models_ds_kpis"
                   },
                   {
                     "parameterName": "param_models",
-                    "queryName": "p_m_kpis"
+                    "queryName": "p_filter_models_ds_compare"
                   },
                   {
                     "parameterName": "param_models",
-                    "queryName": "p_m_compare"
+                    "queryName": "p_filter_models_ds_usage_daily"
+                  },
+                  {
+                    "parameterName": "param_models",
+                    "queryName": "p_filter_models_ds_provider_kpis"
+                  },
+                  {
+                    "parameterName": "param_models",
+                    "queryName": "p_filter_models_ds_provider_sim"
+                  },
+                  {
+                    "parameterName": "param_models",
+                    "queryName": "p_filter_models_ds_provider_daily"
+                  },
+                  {
+                    "parameterName": "param_models",
+                    "queryName": "p_filter_models_ds_harness"
                   },
                   {
                     "fieldName": "destination_model",
                     "displayName": "Modelos usados",
-                    "queryName": "v_m"
-                  },
-                  {
-                    "parameterName": "param_models",
-                    "queryName": "p_m_harness"
-                  },
-                  {
-                    "parameterName": "param_models",
-                    "queryName": "p_m_prov"
+                    "queryName": "v_filter_models"
                   }
                 ]
               },
@@ -732,108 +1006,26 @@
             }
           },
           "position": {
-            "x": 6,
-            "y": 2,
-            "width": 2,
-            "height": 2
-          }
-        },
-        {
-          "widget": {
-            "name": "filter_sim_model",
-            "queries": [
-              {
-                "name": "v_sm",
-                "query": {
-                  "datasetName": "ds_dim_models",
-                  "fields": [
-                    {
-                      "name": "destination_model",
-                      "expression": "`destination_model`"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              },
-              {
-                "name": "p_sm_usage",
-                "query": {
-                  "datasetName": "ds_usage_daily",
-                  "parameters": [
-                    {
-                      "name": "param_sim_model",
-                      "keyword": "param_sim_model"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              },
-              {
-                "name": "p_sm_kpis",
-                "query": {
-                  "datasetName": "ds_kpis",
-                  "parameters": [
-                    {
-                      "name": "param_sim_model",
-                      "keyword": "param_sim_model"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              }
-            ],
-            "spec": {
-              "version": 2,
-              "widgetType": "filter-single-select",
-              "disallowAll": true,
-              "encodings": {
-                "fields": [
-                  {
-                    "parameterName": "param_sim_model",
-                    "queryName": "p_sm_usage"
-                  },
-                  {
-                    "parameterName": "param_sim_model",
-                    "queryName": "p_sm_kpis"
-                  },
-                  {
-                    "fieldName": "destination_model",
-                    "displayName": "Modelo p/ simular",
-                    "queryName": "v_sm"
-                  }
-                ]
-              },
-              "selection": {
-                "defaultSelection": {
-                  "values": {
-                    "dataType": "STRING",
-                    "values": [
-                      {
-                        "value": "claude-opus-4-8"
-                      }
-                    ]
-                  }
-                }
-              },
-              "frame": {
-                "showTitle": true,
-                "title": "Modelo p/ simular"
-              }
-            }
-          },
-          "position": {
             "x": 8,
-            "y": 2,
-            "width": 2,
+            "y": 0,
+            "width": 4,
             "height": 2
           }
-        },
+        }
+      ]
+    },
+    {
+      "name": "modelo_unico",
+      "displayName": "Modelo único",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1",
+      "layout": [
         {
           "widget": {
             "name": "filter_compare_models",
             "queries": [
               {
-                "name": "v_cm",
+                "name": "v_filter_compare_models",
                 "query": {
                   "datasetName": "ds_dim_models_cmp",
                   "fields": [
@@ -846,7 +1038,7 @@
                 }
               },
               {
-                "name": "p_cm_compare",
+                "name": "p_filter_compare_models_ds_compare",
                 "query": {
                   "datasetName": "ds_compare",
                   "parameters": [
@@ -866,26 +1058,165 @@
                 "fields": [
                   {
                     "parameterName": "param_compare_models",
-                    "queryName": "p_cm_compare"
+                    "queryName": "p_filter_compare_models_ds_compare"
                   },
                   {
                     "fieldName": "destination_model",
-                    "displayName": "Modelos p/ comparar",
-                    "queryName": "v_cm"
+                    "displayName": "Modelos p/ simular",
+                    "queryName": "v_filter_compare_models"
                   }
                 ]
               },
               "frame": {
                 "showTitle": true,
-                "title": "Modelos p/ comparar"
+                "title": "Modelos p/ simular"
               }
             }
           },
           "position": {
-            "x": 10,
-            "y": 2,
-            "width": 2,
+            "x": 0,
+            "y": 0,
+            "width": 6,
             "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "filter_sim_model",
+            "queries": [
+              {
+                "name": "v_filter_sim_model",
+                "query": {
+                  "datasetName": "ds_dim_models_sim",
+                  "fields": [
+                    {
+                      "name": "destination_model",
+                      "expression": "`destination_model`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "p_filter_sim_model_ds_kpis",
+                "query": {
+                  "datasetName": "ds_kpis",
+                  "parameters": [
+                    {
+                      "name": "param_sim_model",
+                      "keyword": "param_sim_model"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "p_filter_sim_model_ds_usage_daily",
+                "query": {
+                  "datasetName": "ds_usage_daily",
+                  "parameters": [
+                    {
+                      "name": "param_sim_model",
+                      "keyword": "param_sim_model"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "disallowAll": true,
+              "encodings": {
+                "fields": [
+                  {
+                    "parameterName": "param_sim_model",
+                    "queryName": "p_filter_sim_model_ds_kpis"
+                  },
+                  {
+                    "parameterName": "param_sim_model",
+                    "queryName": "p_filter_sim_model_ds_usage_daily"
+                  },
+                  {
+                    "fieldName": "destination_model",
+                    "displayName": "Modelo p/ economia (cards + linha)",
+                    "queryName": "v_filter_sim_model"
+                  }
+                ]
+              },
+              "selection": {
+                "defaultSelection": {
+                  "values": {
+                    "dataType": "STRING",
+                    "values": [
+                      {
+                        "value": "claude-opus-4-8"
+                      }
+                    ]
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Modelo p/ economia (cards + linha)"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 0,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_economia",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_kpis",
+                  "fields": [
+                    {
+                      "name": "savings",
+                      "expression": "`savings`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "savings",
+                  "displayName": "Economia vs. modelo único (+ = seu mix é mais barato)",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Economia vs. modelo único (+ = seu mix é mais barato)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 4,
+            "height": 3
           }
         },
         {
@@ -907,18 +1238,12 @@
               }
             ],
             "spec": {
-              "frame": {
-                "showTitle": true,
-                "title": {
-                  "value": "Valor real gasto",
-                  "fields": []
-                }
-              },
               "version": 2,
               "widgetType": "counter",
               "encodings": {
                 "value": {
                   "fieldName": "real_cost",
+                  "displayName": "Consumo real",
                   "format": {
                     "type": "number-currency",
                     "currencyCode": "USD",
@@ -927,18 +1252,18 @@
                       "type": "max",
                       "places": 2
                     }
-                  },
-                  "displayName": "Valor real gasto"
+                  }
                 }
               },
-              "data": {
-                "queryName": "main_query"
+              "frame": {
+                "showTitle": true,
+                "title": "Consumo real"
               }
             }
           },
           "position": {
-            "x": 8,
-            "y": 5,
+            "x": 4,
+            "y": 2,
             "width": 4,
             "height": 3
           }
@@ -962,18 +1287,12 @@
               }
             ],
             "spec": {
-              "frame": {
-                "showTitle": true,
-                "title": {
-                  "value": "Valor estimado (modelo único)",
-                  "fields": []
-                }
-              },
               "version": 2,
               "widgetType": "counter",
               "encodings": {
                 "value": {
                   "fieldName": "sim_cost",
+                  "displayName": "Consumo simulado (modelo único)",
                   "format": {
                     "type": "number-currency",
                     "currencyCode": "USD",
@@ -982,54 +1301,68 @@
                       "type": "max",
                       "places": 2
                     }
-                  },
-                  "displayName": "Valor estimado (modelo único)"
+                  }
                 }
               },
-              "data": {
-                "queryName": "main_query"
+              "frame": {
+                "showTitle": true,
+                "title": "Consumo simulado (modelo único)"
               }
             }
           },
           "position": {
-            "x": 4,
-            "y": 5,
+            "x": 8,
+            "y": 2,
             "width": 4,
             "height": 3
           }
         },
         {
           "widget": {
-            "name": "kpi_savings",
+            "name": "chart_compare",
             "queries": [
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "ds_kpis",
+                  "datasetName": "ds_compare",
                   "fields": [
                     {
-                      "name": "savings",
-                      "expression": "`savings`"
+                      "name": "scenario",
+                      "expression": "`scenario`"
+                    },
+                    {
+                      "name": "scenario",
+                      "expression": "`scenario`"
+                    },
+                    {
+                      "name": "sum(cost_usd)",
+                      "expression": "SUM(`cost_usd`)"
                     }
                   ],
-                  "disaggregated": true
+                  "disaggregated": false
                 }
               }
             ],
             "spec": {
-              "frame": {
-                "showTitle": true,
-                "showDescription": true,
-                "title": {
-                  "value": "Economia do período",
-                  "fields": []
-                }
-              },
-              "version": 2,
-              "widgetType": "counter",
+              "version": 3,
+              "widgetType": "bar",
               "encodings": {
-                "value": {
-                  "fieldName": "savings",
+                "x": {
+                  "fieldName": "scenario",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  },
+                  "displayName": "scenario"
+                },
+                "y": {
+                  "fieldName": "sum(cost_usd)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "cost_usd",
                   "format": {
                     "type": "number-currency",
                     "currencyCode": "USD",
@@ -1038,68 +1371,35 @@
                       "type": "max",
                       "places": 2
                     }
+                  }
+                },
+                "color": {
+                  "fieldName": "scenario",
+                  "scale": {
+                    "type": "categorical"
                   },
-                  "style": {
-                    "rules": [
-                      {
-                        "condition": {
-                          "operand": {
-                            "type": "data-value",
-                            "value": "0"
-                          },
-                          "operator": ">="
-                        },
-                        "color": "#00A972"
-                      },
-                      {
-                        "condition": {
-                          "operand": {
-                            "type": "data-value",
-                            "value": "0"
-                          },
-                          "operator": "<"
-                        },
-                        "fontColor": {
-                          "themeColorType": "visualizationColors",
-                          "position": 5
-                        }
-                      }
-                    ]
-                  },
-                  "displayName": "Economia vs. modelo único"
+                  "displayName": "scenario"
+                },
+                "label": {
+                  "show": true
                 }
               },
-              "data": {
-                "queryName": "main_query"
+              "frame": {
+                "showTitle": true,
+                "title": "Custo total do período: real vs. cada modelo único"
               }
             }
           },
           "position": {
             "x": 0,
             "y": 5,
-            "width": 4,
-            "height": 3
-          }
-        },
-        {
-          "widget": {
-            "name": "hdr_cost",
-            "multilineTextboxSpec": {
-              "lines": [
-                "### Custo real vs. estimativa de modelo único"
-              ]
-            }
-          },
-          "position": {
-            "x": 0,
-            "y": 14,
             "width": 12,
-            "height": 1
+            "height": 6
           }
         },
         {
           "widget": {
-            "name": "chart_cost",
+            "name": "chart_model_daily",
             "queries": [
               {
                 "name": "main_query",
@@ -1172,53 +1472,50 @@
               },
               "frame": {
                 "showTitle": true,
-                "title": "Custo diário (USD): real por modelo vs. modelo único"
+                "title": "Custo diário: real por modelo (barras) vs. modelo único (linha)"
               }
             }
           },
           "position": {
             "x": 0,
-            "y": 21,
+            "y": 11,
             "width": 12,
             "height": 6
           }
-        },
+        }
+      ]
+    },
+    {
+      "name": "provider_unico",
+      "displayName": "Provider único",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1",
+      "layout": [
         {
           "widget": {
-            "name": "hdr_tokens",
-            "multilineTextboxSpec": {
-              "lines": [
-                "### Consumo por Modelo e por Harness"
-              ]
-            }
-          },
-          "position": {
-            "x": 0,
-            "y": 27,
-            "width": 12,
-            "height": 1
-          }
-        },
-        {
-          "widget": {
-            "name": "chart_tokens",
+            "name": "filter_sim_providers",
             "queries": [
               {
-                "name": "main_query",
+                "name": "v_filter_sim_providers",
                 "query": {
-                  "datasetName": "ds_usage_daily",
+                  "datasetName": "ds_dim_providers",
                   "fields": [
                     {
-                      "name": "destination_model",
-                      "expression": "`destination_model`"
-                    },
+                      "name": "provider",
+                      "expression": "`provider`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "p_filter_sim_providers_ds_provider_sim",
+                "query": {
+                  "datasetName": "ds_provider_sim",
+                  "parameters": [
                     {
-                      "name": "event_date",
-                      "expression": "`event_date`"
-                    },
-                    {
-                      "name": "sum(total_tokens)",
-                      "expression": "SUM(`total_tokens`)"
+                      "name": "param_sim_providers",
+                      "keyword": "param_sim_providers"
                     }
                   ],
                   "disaggregated": false
@@ -1226,59 +1523,302 @@
               }
             ],
             "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "parameterName": "param_sim_providers",
+                    "queryName": "p_filter_sim_providers_ds_provider_sim"
+                  },
+                  {
+                    "fieldName": "provider",
+                    "displayName": "Providers p/ simular",
+                    "queryName": "v_filter_sim_providers"
+                  }
+                ]
+              },
               "frame": {
                 "showTitle": true,
-                "title": {
-                  "value": "Tokens diários por modelo",
-                  "fields": []
-                }
+                "title": "Providers p/ simular"
               },
-              "version": 3,
-              "widgetType": "bar",
-              "encodings": {
-                "x": {
-                  "fieldName": "event_date",
-                  "displayName": "Dia",
-                  "scale": {
-                    "type": "temporal"
-                  }
-                },
-                "y": {
-                  "fieldName": "sum(total_tokens)",
-                  "displayName": "Tokens",
-                  "scale": {
-                    "type": "quantitative"
-                  }
-                },
-                "color": {
-                  "fieldName": "destination_model",
-                  "displayName": "Modelo",
-                  "scale": {
-                    "type": "categorical"
+              "selection": {
+                "defaultSelection": {
+                  "values": {
+                    "dataType": "STRING",
+                    "values": [
+                      {
+                        "value": "OpenAI"
+                      },
+                      {
+                        "value": "Anthropic"
+                      },
+                      {
+                        "value": "Google"
+                      }
+                    ]
                   }
                 }
-              },
-              "data": {
-                "queryName": "main_query"
               }
             }
           },
           "position": {
             "x": 0,
-            "y": 28,
-            "width": 12,
-            "height": 5
+            "y": 0,
+            "width": 6,
+            "height": 2
           }
         },
         {
           "widget": {
-            "name": "chart_compare",
+            "name": "filter_sim_provider",
+            "queries": [
+              {
+                "name": "v_filter_sim_provider",
+                "query": {
+                  "datasetName": "ds_dim_providers_sim",
+                  "fields": [
+                    {
+                      "name": "provider",
+                      "expression": "`provider`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "p_filter_sim_provider_ds_provider_kpis",
+                "query": {
+                  "datasetName": "ds_provider_kpis",
+                  "parameters": [
+                    {
+                      "name": "param_sim_provider",
+                      "keyword": "param_sim_provider"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "p_filter_sim_provider_ds_provider_daily",
+                "query": {
+                  "datasetName": "ds_provider_daily",
+                  "parameters": [
+                    {
+                      "name": "param_sim_provider",
+                      "keyword": "param_sim_provider"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "disallowAll": true,
+              "encodings": {
+                "fields": [
+                  {
+                    "parameterName": "param_sim_provider",
+                    "queryName": "p_filter_sim_provider_ds_provider_kpis"
+                  },
+                  {
+                    "parameterName": "param_sim_provider",
+                    "queryName": "p_filter_sim_provider_ds_provider_daily"
+                  },
+                  {
+                    "fieldName": "provider",
+                    "displayName": "Provider p/ economia (cards + linha)",
+                    "queryName": "v_filter_sim_provider"
+                  }
+                ]
+              },
+              "selection": {
+                "defaultSelection": {
+                  "values": {
+                    "dataType": "STRING",
+                    "values": [
+                      {
+                        "value": "OpenAI"
+                      }
+                    ]
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Provider p/ economia (cards + linha)"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 0,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_economia_p",
             "queries": [
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "ds_compare",
+                  "datasetName": "ds_provider_kpis",
                   "fields": [
+                    {
+                      "name": "savings",
+                      "expression": "`savings`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "savings",
+                  "displayName": "Economia vs. provider único (+ = seu mix é mais barato)",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Economia vs. provider único (+ = seu mix é mais barato)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_real_p",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_provider_kpis",
+                  "fields": [
+                    {
+                      "name": "real_cost",
+                      "expression": "`real_cost`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "real_cost",
+                  "displayName": "Consumo real (mix direto)",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Consumo real (mix direto)"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 2,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_sim_p",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_provider_kpis",
+                  "fields": [
+                    {
+                      "name": "sim_cost",
+                      "expression": "`sim_cost`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sim_cost",
+                  "displayName": "Consumo simulado (provider único)",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Consumo simulado (provider único)"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 2,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "chart_provider_total",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_provider_sim",
+                  "fields": [
+                    {
+                      "name": "scenario",
+                      "expression": "`scenario`"
+                    },
                     {
                       "name": "scenario",
                       "expression": "`scenario`"
@@ -1293,25 +1833,25 @@
               }
             ],
             "spec": {
-              "frame": {
-                "showTitle": true,
-                "title": {
-                  "value": "Custo total do período: real vs. modelo único",
-                  "fields": []
-                }
-              },
               "version": 3,
               "widgetType": "bar",
               "encodings": {
                 "x": {
                   "fieldName": "scenario",
-                  "displayName": "Cenário",
                   "scale": {
-                    "type": "categorical"
-                  }
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  },
+                  "displayName": "scenario"
                 },
                 "y": {
                   "fieldName": "sum(cost_usd)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "cost_usd",
                   "format": {
                     "type": "number-currency",
                     "currencyCode": "USD",
@@ -1320,35 +1860,126 @@
                       "type": "max",
                       "places": 2
                     }
-                  },
-                  "displayName": "Custo no período (USD)",
-                  "scale": {
-                    "type": "quantitative"
                   }
                 },
                 "color": {
                   "fieldName": "scenario",
-                  "displayName": "Cenário",
                   "scale": {
                     "type": "categorical"
-                  }
+                  },
+                  "displayName": "scenario"
                 },
                 "label": {
                   "show": true
                 }
               },
-              "data": {
-                "queryName": "main_query"
+              "frame": {
+                "showTitle": true,
+                "title": "Custo total do período: mix direto vs. cada provider único"
               }
             }
           },
           "position": {
             "x": 0,
-            "y": 15,
+            "y": 5,
             "width": 12,
             "height": 6
           }
         },
+        {
+          "widget": {
+            "name": "chart_provider_daily",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_provider_daily",
+                  "fields": [
+                    {
+                      "name": "event_date",
+                      "expression": "`event_date`"
+                    },
+                    {
+                      "name": "destination_model",
+                      "expression": "`destination_model`"
+                    },
+                    {
+                      "name": "sum(cost_usd)",
+                      "expression": "SUM(`cost_usd`)"
+                    },
+                    {
+                      "name": "avg(sim_cost_usd)",
+                      "expression": "AVG(`sim_cost_usd`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "combo",
+              "encodings": {
+                "x": {
+                  "fieldName": "event_date",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Dia"
+                },
+                "y": {
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "primary": {
+                    "fields": [
+                      {
+                        "fieldName": "sum(cost_usd)",
+                        "displayName": "Custo mix direto (USD)"
+                      }
+                    ]
+                  },
+                  "secondary": {
+                    "fields": [
+                      {
+                        "fieldName": "avg(sim_cost_usd)",
+                        "displayName": "Estimado provider único (USD)"
+                      }
+                    ]
+                  }
+                },
+                "color": {
+                  "fieldName": "destination_model",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Modelo"
+                },
+                "label": {
+                  "show": false
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Custo diário: mix direto por modelo (barras) vs. provider único (linha)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 11,
+            "width": 12,
+            "height": 6
+          }
+        }
+      ]
+    },
+    {
+      "name": "consumo",
+      "displayName": "Consumo",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1",
+      "layout": [
         {
           "widget": {
             "name": "chart_harness",
@@ -1358,6 +1989,10 @@
                 "query": {
                   "datasetName": "ds_harness",
                   "fields": [
+                    {
+                      "name": "harness",
+                      "expression": "`harness`"
+                    },
                     {
                       "name": "harness",
                       "expression": "`harness`"
@@ -1380,17 +2015,17 @@
                   "scale": {
                     "type": "categorical",
                     "sort": {
-                      "by": "value"
+                      "by": "y-reversed"
                     }
                   },
-                  "displayName": "Harness"
+                  "displayName": "harness"
                 },
                 "y": {
                   "fieldName": "sum(cost_usd)",
                   "scale": {
                     "type": "quantitative"
                   },
-                  "displayName": "Custo no período (USD)",
+                  "displayName": "cost_usd",
                   "format": {
                     "type": "number-currency",
                     "currencyCode": "USD",
@@ -1406,7 +2041,7 @@
                   "scale": {
                     "type": "categorical"
                   },
-                  "displayName": "Harness"
+                  "displayName": "harness"
                 },
                 "label": {
                   "show": true
@@ -1420,107 +2055,27 @@
           },
           "position": {
             "x": 0,
-            "y": 33,
+            "y": 0,
             "width": 12,
             "height": 6
           }
         },
         {
           "widget": {
-            "name": "filter_providers",
-            "queries": [
-              {
-                "name": "dashboards/01f1a3b299c510ebaf75c10166c7b969/datasets/01f1a3b2f30d14649b79653fb548bd2d_provider",
-                "query": {
-                  "datasetName": "ds_dim_providers",
-                  "fields": [
-                    {
-                      "name": "provider",
-                      "expression": "`provider`"
-                    },
-                    {
-                      "name": "provider_associativity",
-                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              },
-              {
-                "name": "parameter_dashboards/01f1a3b299c510ebaf75c10166c7b969/datasets/01f1a3b2f30d146388923cd5abcd3a9e_param_sim_providers",
-                "query": {
-                  "datasetName": "ds_provider_sim",
-                  "parameters": [
-                    {
-                      "name": "param_sim_providers",
-                      "keyword": "param_sim_providers"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              }
-            ],
-            "spec": {
-              "version": 2,
-              "selection": {
-                "defaultSelection": {
-                  "values": {
-                    "dataType": "STRING",
-                    "values": [
-                      {
-                        "value": "OpenAI"
-                      },
-                      {
-                        "value": "Anthropic"
-                      },
-                      {
-                        "value": "Google"
-                      }
-                    ]
-                  }
-                }
-              },
-              "frame": {
-                "showTitle": true,
-                "title": {
-                  "value": "Providers p/ simular (direto)",
-                  "fields": []
-                }
-              },
-              "widgetType": "filter-multi-select",
-              "encodings": {
-                "fields": [
-                  {
-                    "parameterName": "param_sim_providers",
-                    "queryName": "parameter_dashboards/01f1a3b299c510ebaf75c10166c7b969/datasets/01f1a3b2f30d146388923cd5abcd3a9e_param_sim_providers"
-                  },
-                  {
-                    "fieldName": "provider",
-                    "queryName": "dashboards/01f1a3b299c510ebaf75c10166c7b969/datasets/01f1a3b2f30d14649b79653fb548bd2d_provider"
-                  }
-                ]
-              }
-            }
-          },
-          "position": {
-            "x": 0,
-            "y": 4,
-            "width": 12,
-            "height": 1
-          }
-        },
-        {
-          "widget": {
-            "name": "chart_provider",
+            "name": "chart_cost_bymodel",
             "queries": [
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "ds_provider_sim",
+                  "datasetName": "ds_usage_daily",
                   "fields": [
                     {
-                      "name": "scenario",
-                      "expression": "`scenario`"
+                      "name": "event_date",
+                      "expression": "`event_date`"
+                    },
+                    {
+                      "name": "destination_model",
+                      "expression": "`destination_model`"
                     },
                     {
                       "name": "sum(cost_usd)",
@@ -1532,28 +2087,22 @@
               }
             ],
             "spec": {
-              "frame": {
-                "showTitle": true,
-                "title": {
-                  "value": "Custo do período: mix atual vs. provider único (preço direto do provider)",
-                  "fields": []
-                }
-              },
               "version": 3,
               "widgetType": "bar",
               "encodings": {
                 "x": {
-                  "fieldName": "scenario",
-                  "displayName": "Cenário",
+                  "fieldName": "event_date",
                   "scale": {
-                    "type": "categorical",
-                    "sort": {
-                      "by": "y-reversed"
-                    }
-                  }
+                    "type": "temporal"
+                  },
+                  "displayName": "event_date"
                 },
                 "y": {
                   "fieldName": "sum(cost_usd)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "cost_usd",
                   "format": {
                     "type": "number-currency",
                     "currencyCode": "USD",
@@ -1562,38 +2111,184 @@
                       "type": "max",
                       "places": 2
                     }
-                  },
-                  "displayName": "Custo no período (USD, preço direto)",
-                  "scale": {
-                    "type": "quantitative"
                   }
                 },
                 "color": {
-                  "fieldName": "scenario",
-                  "displayName": "Cenário",
+                  "fieldName": "destination_model",
                   "scale": {
                     "type": "categorical"
-                  }
+                  },
+                  "displayName": "destination_model"
                 },
                 "label": {
                   "show": true
                 }
               },
-              "data": {
-                "queryName": "main_query"
+              "frame": {
+                "showTitle": true,
+                "title": "Custo diário por modelo (USD)"
               }
             }
           },
           "position": {
             "x": 0,
-            "y": 8,
-            "width": 12,
+            "y": 6,
+            "width": 6,
             "height": 6
           }
+        },
+        {
+          "widget": {
+            "name": "chart_tokens_bymodel",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_usage_daily",
+                  "fields": [
+                    {
+                      "name": "event_date",
+                      "expression": "`event_date`"
+                    },
+                    {
+                      "name": "destination_model",
+                      "expression": "`destination_model`"
+                    },
+                    {
+                      "name": "sum(total_tokens)",
+                      "expression": "SUM(`total_tokens`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "event_date",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "event_date"
+                },
+                "y": {
+                  "fieldName": "sum(total_tokens)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "total_tokens"
+                },
+                "color": {
+                  "fieldName": "destination_model",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "destination_model"
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Tokens diários por modelo"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 6,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "table_aa",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_aa_table",
+                  "fields": [
+                    {
+                      "name": "provider",
+                      "expression": "`provider`"
+                    },
+                    {
+                      "name": "model",
+                      "expression": "`model`"
+                    },
+                    {
+                      "name": "intelligence",
+                      "expression": "`intelligence`"
+                    },
+                    {
+                      "name": "blended_price",
+                      "expression": "`blended_price`"
+                    },
+                    {
+                      "name": "tokens_per_s",
+                      "expression": "`tokens_per_s`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "provider",
+                    "displayName": "Provider"
+                  },
+                  {
+                    "fieldName": "model",
+                    "displayName": "Modelo"
+                  },
+                  {
+                    "fieldName": "intelligence",
+                    "displayName": "Performance"
+                  },
+                  {
+                    "fieldName": "blended_price",
+                    "displayName": "Custo (USD/1M, blended)",
+                    "format": {
+                      "type": "number-currency",
+                      "currencyCode": "USD",
+                      "abbreviation": "compact",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 2
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "tokens_per_s",
+                    "displayName": "Velocidade (tok/s)"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Artificial Analysis — performance × custo × velocidade"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 12,
+            "width": 12,
+            "height": 7
+          }
         }
-      ],
-      "pageType": "PAGE_TYPE_CANVAS",
-      "layoutVersion": "GRID_V1"
+      ]
     }
   ],
   "uiSettings": {
