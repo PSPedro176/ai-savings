@@ -23,6 +23,9 @@ variables:
   warehouse_id:
     description: SQL Warehouse que executa o dashboard AI Savings
     default: 8edbc02ddff2de2d
+  dashboard_parent:
+    description: Pasta do workspace onde a dashboard é publicada
+    default: /Workspace/Shared/dashboards
 
 targets:
   dev:
@@ -32,12 +35,14 @@ targets:
       profile: perdomo
     variables:
       catalog: perdomo_demos_catalog
+      dashboard_parent: /Workspace/Users/${workspace.current_user.userName}/dashboards
 
   prod:
     mode: production
     workspace:
       profile: perdomo
-      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
     variables:
       catalog: perdomo_demos_catalog
       schema: ai_savings
+      dashboard_parent: /Workspace/Shared/dashboards
