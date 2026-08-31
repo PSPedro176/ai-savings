@@ -76,10 +76,16 @@ token_side AS (
     AND (invocation_metadata.source != 'AI_QUERY' OR invocation_metadata.source IS NULL)
     AND (service_type != 'MCP_SERVICE' OR service_type IS NULL)
   GROUP BY 1, 2, 3, 4
+),
+-- Nome do workspace (life-quality: filtrar por nome em vez de ID).
+ws AS (
+  SELECT CAST(workspace_id AS STRING) AS workspace_id, workspace_name
+  FROM system.access.workspaces_latest
 )
 SELECT
   COALESCE(c.event_date, t.event_date)             AS event_date,
   COALESCE(c.workspace_id, t.workspace_id)         AS workspace_id,
+  COALESCE(ws.workspace_name, COALESCE(c.workspace_id, t.workspace_id)) AS workspace_name,
   COALESCE(c.endpoint_name, t.endpoint_name)       AS endpoint_name,
   COALESCE(c.destination_model, t.destination_model) AS destination_model,
   COALESCE(c.destination_type, 'Unknown')          AS destination_type,
@@ -95,4 +101,6 @@ FULL OUTER JOIN token_side t
   ON  c.event_date       = t.event_date
   AND c.workspace_id     = t.workspace_id
   AND c.endpoint_name    = t.endpoint_name
-  AND c.destination_model = t.destination_model;
+  AND c.destination_model = t.destination_model
+LEFT JOIN ws
+  ON ws.workspace_id = COALESCE(c.workspace_id, t.workspace_id);
