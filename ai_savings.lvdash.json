@@ -179,7 +179,15 @@
           "complexType": "MULTI",
           "defaultSelection": {
             "values": {
-              "dataType": "STRING"
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "claude-opus-4-8"
+                },
+                {
+                  "value": "gpt-5-6-sol"
+                }
+              ]
             }
           }
         }
@@ -1526,6 +1534,21 @@
               "frame": {
                 "showTitle": true,
                 "title": "Modelos p/ simular"
+              },
+              "selection": {
+                "defaultSelection": {
+                  "values": {
+                    "dataType": "STRING",
+                    "values": [
+                      {
+                        "value": "claude-opus-4-8"
+                      },
+                      {
+                        "value": "gpt-5-6-sol"
+                      }
+                    ]
+                  }
+                }
               }
             }
           },
