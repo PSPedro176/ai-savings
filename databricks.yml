@@ -36,8 +36,8 @@ targets:
   prod:
     mode: production
     workspace:
-      # TODO: preencha com seu profile de produção
-      profile: DEFAULT
+      profile: perdomo
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
     variables:
       catalog: perdomo_demos_catalog
       schema: ai_savings
