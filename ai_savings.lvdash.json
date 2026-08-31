@@ -2,7 +2,7 @@
   "datasets": [
     {
       "name": "ds_usage_daily",
-      "displayName": "Consumo diário por modelo + simulação",
+      "displayName": "Consumo diário por modelo + comparação",
       "queryLines": [
         "WITH scoped AS (   SELECT * FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily   WHERE (size(:param_workspace) = 0 OR array_contains(:param_workspace, workspace_name)) ), base AS (   SELECT * FROM scoped   WHERE event_date BETWEEN :date_range.min AND :date_range.max     AND (size(:param_models) = 0 OR array_contains(:param_models, destination_model)) ), sim_rate AS (   SELECT CAST(SUM(cost_usd) AS DOUBLE) / NULLIF(SUM(total_tokens), 0) AS rate  FROM scoped WHERE destination_model = :param_sim_model ), daily AS (   SELECT event_date, SUM(total_tokens) AS day_tokens FROM base GROUP BY event_date ) SELECT   b.event_date,   b.destination_model,   CAST(SUM(b.cost_usd) AS DECIMAL(38,2)) AS cost_usd,   SUM(b.total_tokens) AS total_tokens,   CAST(MIN(d.day_tokens) * MIN(s.rate) AS DECIMAL(38,2)) AS sim_cost_usd FROM base b JOIN daily d ON b.event_date = d.event_date CROSS JOIN sim_rate s GROUP BY b.event_date, b.destination_model ORDER BY b.event_date "
       ],
@@ -243,7 +243,7 @@
     },
     {
       "name": "ds_provider_sim",
-      "displayName": "Simulação por provider único (preço direto)",
+      "displayName": "Comparação por provider único (preço direto)",
       "queryLines": [
         "WITH ref AS (SELECT * FROM perdomo_demos_catalog.ai_savings.v_aa_model_ref), real AS (   SELECT destination_model, SUM(input_tokens) inp, SUM(output_tokens) outp,          SUM(cache_read_input_tokens) cread, SUM(cache_creation_input_tokens) cwrite   FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily   WHERE (size(:param_workspace) = 0 OR array_contains(:param_workspace, workspace_name))     AND event_date BETWEEN :date_range.min AND :date_range.max     AND (size(:param_models) = 0 OR array_contains(:param_models, destination_model))   GROUP BY 1 ), real_aa AS (   SELECT r.*, ref.intelligence r_intel, ref.price_input rp_in, ref.price_output rp_out,          ref.price_cache_read rp_cr, ref.price_cache_write rp_cw   FROM real r JOIN ref ON r.destination_model = ref.slug_norm ), base AS (   SELECT '0 · Mix atual (direto)' AS scenario,          SUM((GREATEST(inp - cread - cwrite, 0) * rp_in + cread * COALESCE(rp_cr, rp_in)               + cwrite * COALESCE(rp_cw, rp_in) + outp * rp_out) / 1e6) AS cost_usd   FROM real_aa ), cand AS (   SELECT ra.destination_model, ra.inp, ra.outp, ra.cread, ra.cwrite, ep.provider target_provider,          ep.price_input, ep.price_output, ep.price_cache_read pcr, ep.price_cache_write pcw,          ROW_NUMBER() OVER (PARTITION BY ra.destination_model, ep.provider                             ORDER BY ABS(ep.intelligence - ra.r_intel), ep.intelligence DESC) rn   FROM real_aa ra JOIN ref ep ON TRUE ), per_prov AS (   SELECT concat('Só ', target_provider) AS scenario, target_provider,          SUM((GREATEST(inp - cread - cwrite, 0) * price_input + cread * COALESCE(pcr, price_input)               + cwrite * COALESCE(pcw, price_input) + outp * price_output) / 1e6) AS cost_usd   FROM cand WHERE rn = 1 GROUP BY target_provider ) SELECT scenario, CAST(cost_usd AS DECIMAL(38,2)) AS cost_usd FROM base UNION ALL SELECT scenario, CAST(cost_usd AS DECIMAL(38,2)) AS cost_usd FROM per_prov WHERE array_contains(:param_sim_providers, target_provider) ORDER BY cost_usd DESC "
       ],
@@ -1007,14 +1007,14 @@
                   },
                   {
                     "fieldName": "provider",
-                    "displayName": "Providers p/ simular",
+                    "displayName": "Providers p/ comparar",
                     "queryName": "v_filter_sim_providers"
                   }
                 ]
               },
               "frame": {
                 "showTitle": true,
-                "title": "Providers p/ simular"
+                "title": "Providers p/ comparar"
               },
               "selection": {
                 "defaultSelection": {
@@ -1285,7 +1285,7 @@
               "encodings": {
                 "value": {
                   "fieldName": "sim_cost",
-                  "displayName": "Consumo simulado (provider único)",
+                  "displayName": "Consumo comparado (provider único)",
                   "format": {
                     "type": "number-currency",
                     "currencyCode": "USD",
@@ -1299,7 +1299,7 @@
               },
               "frame": {
                 "showTitle": true,
-                "title": "Consumo simulado (provider único)"
+                "title": "Consumo comparado (provider único)"
               }
             }
           },
@@ -1526,14 +1526,14 @@
                   },
                   {
                     "fieldName": "destination_model",
-                    "displayName": "Modelos p/ simular",
+                    "displayName": "Modelos p/ comparar",
                     "queryName": "v_filter_compare_models"
                   }
                 ]
               },
               "frame": {
                 "showTitle": true,
-                "title": "Modelos p/ simular"
+                "title": "Modelos p/ comparar"
               },
               "selection": {
                 "defaultSelection": {
@@ -1804,7 +1804,7 @@
               "encodings": {
                 "value": {
                   "fieldName": "sim_cost",
-                  "displayName": "Consumo simulado (modelo único)",
+                  "displayName": "Consumo comparado (modelo único)",
                   "format": {
                     "type": "number-currency",
                     "currencyCode": "USD",
@@ -1818,7 +1818,7 @@
               },
               "frame": {
                 "showTitle": true,
-                "title": "Consumo simulado (modelo único)"
+                "title": "Consumo comparado (modelo único)"
               }
             }
           },
