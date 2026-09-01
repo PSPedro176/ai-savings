@@ -1,0 +1,23 @@
+# Config do Databricks App: sobe o FastAPI (serve a API + o SPA em frontend/dist).
+command:
+  - "uvicorn"
+  - "app:app"
+  - "--host"
+  - "0.0.0.0"
+  - "--port"
+  - "8000"
+
+# Env estático (evita depender de bindings de resource p/ Lakebase autoscaling).
+# O service principal do app precisa de: CAN_USE no warehouse + role de acesso ao Lakebase.
+# PGUSER é derivado no código (DATABRICKS_CLIENT_ID) quando não setado aqui.
+env:
+  - name: WAREHOUSE_ID
+    value: "8edbc02ddff2de2d"
+  - name: MODEL_REF_VIEW
+    value: "perdomo_demos_catalog.ai_savings.model_ref_snapshot"
+  - name: PGHOST
+    value: "ep-cool-dream-d1hlqscs.database.us-west-2.cloud.databricks.com"
+  - name: PGPORT
+    value: "5432"
+  - name: PGDATABASE
+    value: "ai_savings"

@@ -1,0 +1,136 @@
+/* =========================================================================
+   AI Savings — design system (identidade Databricks, tema claro)
+   Papel quente (oat) + tinta fria (navy) + acento Lava raro. Ver .impeccable.md.
+   ========================================================================= */
+:root {
+  /* marca */
+  --lava: #ff3621;
+  --lava-ink: #c62d17;        /* lava escurecido p/ texto sobre claro */
+  --lava-wash: #fff1ec;
+  --navy: #1b3139;
+  --navy-600: #2b4a54;
+  --navy-400: #567079;
+
+  /* superfícies (papel quente) */
+  --oat: #f3efe8;
+  --oat-deep: #ebe5da;
+  --surface: #ffffff;
+  --surface-2: #fbf9f4;
+
+  /* tinta */
+  --ink: #17272d;
+  --ink-2: #46585f;           /* secundário */
+  --ink-3: #7d8b8f;           /* sutil */
+  --border: #e4ddd0;
+  --border-2: #d3cabb;
+
+  /* rampa de tiers (sequencial, hue teal, luminância monotônica) + otimizado */
+  --tier-alta: #124851;
+  --tier-media: #3b818e;
+  --tier-baixa: #8fbcc2;
+  --optimized: var(--lava);
+  --positive: #1f7a54;        /* verde considerado p/ deltas positivos */
+
+  /* tipografia */
+  --font-display: "Bricolage Grotesque", "Hanken Grotesk", system-ui, sans-serif;
+  --font-body: "Hanken Grotesk", system-ui, -apple-system, sans-serif;
+
+  /* espaçamento 4pt */
+  --space-3xs: 4px; --space-2xs: 8px; --space-xs: 12px; --space-sm: 16px;
+  --space-md: 24px; --space-lg: 32px; --space-xl: 48px; --space-2xl: 64px;
+  --space-3xl: 96px;
+
+  --radius-sm: 6px; --radius-md: 10px; --radius-lg: 16px; --radius-xl: 24px;
+  --shadow-sm: 0 1px 2px rgba(23, 39, 45, 0.06), 0 1px 3px rgba(23, 39, 45, 0.05);
+  --shadow-md: 0 6px 24px -8px rgba(23, 39, 45, 0.16);
+  --shadow-lg: 0 24px 60px -18px rgba(23, 39, 45, 0.28);
+
+  --maxw: 1200px;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  color: var(--ink);
+  background: var(--oat);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  font-variant-numeric: tabular-nums;
+}
+h1, h2, h3, h4 { font-family: var(--font-display); margin: 0; line-height: 1.05; font-weight: 700; letter-spacing: -0.01em; }
+button { font-family: inherit; cursor: pointer; }
+input { font-family: inherit; }
+a { color: var(--lava-ink); }
+.tnum { font-variant-numeric: tabular-nums; }
+
+/* ---- app shell ---- */
+.shell { min-height: 100%; display: flex; flex-direction: column; }
+.topbar {
+  display: flex; align-items: center; gap: var(--space-md);
+  padding: var(--space-sm) var(--space-lg);
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in oklab, var(--oat) 70%, var(--surface));
+  position: sticky; top: 0; z-index: 20;
+  backdrop-filter: saturate(1.1);
+}
+.brand { display: flex; align-items: baseline; gap: 10px; }
+.brand .mark { width: 12px; height: 12px; border-radius: 3px; background: var(--lava); transform: translateY(1px); }
+.brand .name { font-family: var(--font-display); font-weight: 800; font-size: 18px; letter-spacing: -0.02em; color: var(--ink); }
+.brand .sub { color: var(--ink-3); font-size: 13px; font-weight: 500; }
+
+/* segmented tabs */
+.tabs { display: inline-flex; background: var(--oat-deep); padding: 3px; border-radius: var(--radius-md); gap: 2px; }
+.tabs button {
+  border: 0; background: transparent; color: var(--ink-2); font-weight: 600; font-size: 14px;
+  padding: 7px 16px; border-radius: 8px; transition: color .15s, background .15s, box-shadow .15s;
+}
+.tabs button[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sm); }
+.spacer { flex: 1; }
+
+.main { flex: 1; width: 100%; max-width: var(--maxw); margin: 0 auto; padding: var(--space-xl) var(--space-lg) var(--space-3xl); }
+
+/* ---- buttons ---- */
+.btn {
+  border: 1px solid var(--border-2); background: var(--surface); color: var(--ink);
+  padding: 10px 18px; border-radius: var(--radius-sm); font-weight: 600; font-size: 14px;
+  transition: transform .12s cubic-bezier(.2,.8,.2,1), box-shadow .15s, background .15s, border-color .15s;
+}
+.btn:hover { box-shadow: var(--shadow-sm); }
+.btn:active { transform: translateY(1px); }
+.btn.primary { background: var(--lava); border-color: var(--lava); color: #fff; }
+.btn.primary:hover { box-shadow: 0 8px 22px -8px rgba(255, 54, 33, .6); }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--ink-2); padding-inline: 10px; }
+.btn.ghost:hover { background: var(--oat-deep); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn.lg { padding: 13px 24px; font-size: 15px; }
+
+/* ---- surfaces / panels ---- */
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); }
+.eyebrow { text-transform: uppercase; letter-spacing: .12em; font-size: 11px; font-weight: 700; color: var(--ink-3); }
+
+/* ---- steps rail ---- */
+.stepbar { display: flex; align-items: center; gap: var(--space-2xs); margin-bottom: var(--space-lg); flex-wrap: wrap; }
+.step-chip { display: flex; align-items: center; gap: 8px; padding: 6px 12px 6px 8px; border-radius: 999px; color: var(--ink-3); font-weight: 600; font-size: 13px; }
+.step-chip .n { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; background: var(--oat-deep); color: var(--ink-2); }
+.step-chip.active { color: var(--ink); }
+.step-chip.active .n { background: var(--navy); color: #fff; }
+.step-chip.done .n { background: var(--positive); color: #fff; }
+.step-sep { width: 22px; height: 1px; background: var(--border-2); }
+
+/* ---- forms ---- */
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field label { font-weight: 600; font-size: 13px; color: var(--ink-2); }
+.select, .text-input {
+  border: 1px solid var(--border-2); background: var(--surface); color: var(--ink);
+  padding: 10px 12px; border-radius: var(--radius-sm); font-size: 14px; min-width: 200px;
+}
+.select:focus, .text-input:focus { outline: 2px solid color-mix(in oklab, var(--navy) 40%, transparent); outline-offset: 1px; border-color: var(--navy-400); }
+.checkbox { display: inline-flex; align-items: center; gap: 10px; font-weight: 600; color: var(--ink-2); font-size: 14px; user-select: none; }
+.checkbox input { width: 17px; height: 17px; accent-color: var(--navy); }
+
+/* ---- disclaimer / note ---- */
+.note { color: var(--ink-3); font-size: 13px; }
+.warn { color: var(--lava-ink); font-size: 13px; font-weight: 600; }

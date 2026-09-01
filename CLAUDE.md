@@ -1,8 +1,8 @@
 # ai-savings — estado do projeto
 
-Ferramenta para estimar **economia potencial em IA** de clientes Databricks. Hoje: um
-dashboard AI/BI (Lakeview) deployado via DABs. Próximo: um **app** (calculadora de economia)
-reutilizando a mesma camada de dados.
+Ferramenta para estimar **economia potencial em IA** de clientes Databricks. Duas entregas:
+(1) dashboard AI/BI (Lakeview) sobre system tables — Fase 1; (2) **App Databricks** (calculadora
+de economia, React+FastAPI) que o cliente usa em self-service com o consumo que ELE traz — Fase 2.
 
 ## Ambiente
 
@@ -77,6 +77,50 @@ Wording: usar **"comparar/comparação"**, não "simular/simulação".
 - **Job `leaderboard`** centraliza o setup: coleta a AA → condition task `views_missing`
   (task value `create_needed` setado por `aa_leaderboard.py`) → cria as 2 views EM PARALELO
   só se faltarem. Fluxo: deploy → roda o job 1x → tudo pronto; depois roda semanal só coletando.
+
+## App calculadora (Fase 2, `app/`) — React + FastAPI, um serviço
+
+Deploy dev no ar: `https://ai-savings-dev-7474652474621326.aws.databricksapps.com`.
+Duas abas: **Estimar economia** (o fluxo) e **Acompanhar economia** (embed do dashboard da Fase 1).
+
+- **Backend** (`app/server/`): `engine.py` = motor de cálculo puro (testado em `app/tests/`);
+  `model_ref.py` lê a referência de modelos via warehouse; `db.py` conecta ao Lakebase;
+  rotas em `routes/` (reference, estimate, dashboard). `config.py` faz auth dual-mode
+  (WorkspaceClient no App / profile `perdomo` local).
+- **Frontend** (`app/frontend/`, Vite+React+TS): identidade Databricks tema claro (ver
+  `.impeccable.md`). Fluxo em 3 passos: provider → grade colável de consumo → orçamento
+  (tiers Alta/Média/Baixa) + gráfico comparativo (2 colunas de tokens/US$, fitas ligando tiers,
+  segmentos otimizados em Lava, toggle, título dinâmico). Build em `frontend/dist` (servido
+  pelo FastAPI). Sem LLM — a sugestão OSS é lookup determinístico.
+
+### Motor de cálculo (semântica confirmada — o coração do app)
+- Distribuição em **tokens**; ambas as colunas a **preço de lista AA** (isola o efeito do
+  rebalanceamento + otimização). Gasto US$ digitado = só âncora.
+- 4 campos de token **independentes e aditivos** (faturamento Anthropic/OpenAI), ≠ da Fase 1.
+- Tier por bandas de `intelligence` (Alta ≥50, Média 28–50, Baixa <28 — em `engine.py`).
+- **% alvo** = rebalancear tokens entre tiers (fatia não-otimizada fica nos modelos do cliente);
+  **% otimizável** = trocar por modelo equivalente mais barato **disponível na Databricks**.
+
+### Camada de dados nova
+- **`ddl/v_model_ref.sql`**: `v_aa_model_ref` + disponibilidade Databricks (`on_databricks`,
+  via `system.serving.served_entities`, endpoints `databricks-*` chat ativos; casa por slug).
+- **`perdomo_demos_catalog.ai_savings.model_ref_snapshot`**: CTAS de `v_model_ref` (o app lê a
+  TABELA, não a view, para o SP não precisar de acesso a system tables). Job recria no refresh.
+- **Lakebase** (autoscaling, project `ai-savings`, db `ai_savings`): tabela `estimates` (JSONB).
+  Schema em `app/db/schema.sql`; init via `app/scripts/init_lakebase.py`.
+
+### Deploy do app (DABs) — armadilhas importantes
+- `resources/app.yml` (recurso `apps`) + `app/app.yaml` (env estático: WAREHOUSE_ID, PG*).
+- **Lakebase autoscaling NÃO é endereçável como app database resource** (só DatabaseInstance do
+  tier provisioned). Conexão via *database credential* gerada em runtime: `POST
+  /api/2.0/postgres/credentials` com `{"endpoint": "<path>"}` (NÃO o token OAuth genérico).
+- **Role Postgres do SP**: criar via `databricks postgres create-role` com
+  `identity_type=SERVICE_PRINCIPAL, auth_method=LAKEBASE_OAUTH_V1` — `CREATE ROLE` manual NÃO é
+  reconhecido no login federado. Script: `app/scripts/setup_app_lakebase.sh <APP> <PROFILE>`.
+- Grants UC ao SP: USE CATALOG/SCHEMA + SELECT em `model_ref_snapshot` (feito no setup).
+- Fluxo: `bundle deploy` → `bundle run ai_savings_app` → `setup_app_lakebase.sh` (1x).
+- **Embed da aba de acompanhamento** exige habilitar *embedding de dashboards AI/BI* no workspace
+  (config de admin); sem isso, mostra fallback "Abrir no Databricks" (comportamento esperado).
 
 ## Limitações conhecidas / próximos
 

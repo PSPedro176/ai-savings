@@ -1,0 +1,18 @@
+resources:
+  apps:
+    ai_savings_app:
+      name: "ai-savings-${bundle.target}"
+      description: "Calculadora de economia potencial em IA (Fase 2)"
+      source_code_path: ../app
+
+      # Resources do app: acesso ao warehouse (referência AA) e ao Lakebase (estimativas).
+      resources:
+        - name: sql-warehouse
+          description: "Warehouse que serve a referência AA"
+          sql_warehouse:
+            id: ${var.warehouse_id}
+            permission: CAN_USE
+
+        # NB: o Lakebase autoscaling (project) ainda não é endereçável como app database
+        # resource (só DatabaseInstance do tier provisioned). A conexão do app ao Postgres
+        # é feita via database credential gerada em runtime (server/db.py) + role do SP.

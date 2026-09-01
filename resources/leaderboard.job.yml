@@ -52,3 +52,13 @@ resources:
             file:
               path: ../ddl/v_aa_model_ref.sql
               source: WORKSPACE
+
+        # 4) v_model_ref (AA + disponibilidade Databricks) — depende de v_aa_model_ref.
+        - task_key: create_v_model_ref
+          depends_on:
+            - task_key: create_v_aa_model_ref
+          sql_task:
+            warehouse_id: ${var.warehouse_id}
+            file:
+              path: ../ddl/v_model_ref.sql
+              source: WORKSPACE
