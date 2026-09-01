@@ -245,7 +245,74 @@
       "name": "ds_provider_sim",
       "displayName": "Comparação por provider único (preço direto)",
       "queryLines": [
-        "WITH ref AS (SELECT * FROM perdomo_demos_catalog.ai_savings.v_aa_model_ref), real AS (   SELECT destination_model, SUM(input_tokens) inp, SUM(output_tokens) outp,          SUM(cache_read_input_tokens) cread, SUM(cache_creation_input_tokens) cwrite   FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily   WHERE (size(:param_workspace) = 0 OR array_contains(:param_workspace, workspace_name))     AND event_date BETWEEN :date_range.min AND :date_range.max     AND (size(:param_models) = 0 OR array_contains(:param_models, destination_model))   GROUP BY 1 ), real_aa AS (   SELECT r.*, ref.intelligence r_intel, ref.price_input rp_in, ref.price_output rp_out,          ref.price_cache_read rp_cr, ref.price_cache_write rp_cw   FROM real r JOIN ref ON r.destination_model = ref.slug_norm ), base AS (   SELECT '0 · Mix atual (direto)' AS scenario,          SUM((GREATEST(inp - cread - cwrite, 0) * rp_in + cread * COALESCE(rp_cr, rp_in)               + cwrite * COALESCE(rp_cw, rp_in) + outp * rp_out) / 1e6) AS cost_usd   FROM real_aa ), cand AS (   SELECT ra.destination_model, ra.inp, ra.outp, ra.cread, ra.cwrite, ep.provider target_provider,          ep.price_input, ep.price_output, ep.price_cache_read pcr, ep.price_cache_write pcw,          ROW_NUMBER() OVER (PARTITION BY ra.destination_model, ep.provider                             ORDER BY ABS(ep.intelligence - ra.r_intel), ep.intelligence DESC) rn   FROM real_aa ra JOIN ref ep ON TRUE ), per_prov AS (   SELECT concat('Só ', target_provider) AS scenario, target_provider,          SUM((GREATEST(inp - cread - cwrite, 0) * price_input + cread * COALESCE(pcr, price_input)               + cwrite * COALESCE(pcw, price_input) + outp * price_output) / 1e6) AS cost_usd   FROM cand WHERE rn = 1 GROUP BY target_provider ) SELECT scenario, CAST(cost_usd AS DECIMAL(38,2)) AS cost_usd FROM base UNION ALL SELECT scenario, CAST(cost_usd AS DECIMAL(38,2)) AS cost_usd FROM per_prov WHERE array_contains(:param_sim_providers, target_provider) ORDER BY cost_usd DESC "
+        "WITH ref AS (SELECT * FROM perdomo_demos_catalog.ai_savings.v_model_ref WHERE on_databricks), real AS (   SELECT destination_model, SUM(input_tokens) inp, SUM(output_tokens) outp,          SUM(cache_read_input_tokens) cread, SUM(cache_creation_input_tokens) cwrite   FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily   WHERE (size(:param_workspace) = 0 OR array_contains(:param_workspace, workspace_name))     AND event_date BETWEEN :date_range.min AND :date_range.max     AND (size(:param_models) = 0 OR array_contains(:param_models, destination_model))   GROUP BY 1 ), real_aa AS (   SELECT r.*, ref.intelligence r_intel, ref.price_input rp_in, ref.price_output rp_out,          ref.price_cache_read rp_cr, ref.price_cache_write rp_cw   FROM real r JOIN ref ON r.destination_model = ref.slug_norm ), base AS (   SELECT '0 · Mix atual (direto)' AS scenario,          SUM((GREATEST(inp - cread - cwrite, 0) * rp_in + cread * COALESCE(rp_cr, rp_in)               + cwrite * COALESCE(rp_cw, rp_in) + outp * rp_out) / 1e6) AS cost_usd   FROM real_aa ), cand AS (   SELECT ra.destination_model, ra.inp, ra.outp, ra.cread, ra.cwrite, ep.provider target_provider,          ep.price_input, ep.price_output, ep.price_cache_read pcr, ep.price_cache_write pcw,          ROW_NUMBER() OVER (PARTITION BY ra.destination_model, ep.provider                             ORDER BY ABS(ep.intelligence - ra.r_intel), ep.intelligence DESC) rn   FROM real_aa ra JOIN ref ep ON TRUE ), per_prov AS (   SELECT concat('Só ', target_provider) AS scenario, target_provider,          SUM((GREATEST(inp - cread - cwrite, 0) * price_input + cread * COALESCE(pcr, price_input)               + cwrite * COALESCE(pcw, price_input) + outp * price_output) / 1e6) AS cost_usd   FROM cand WHERE rn = 1 GROUP BY target_provider ) SELECT scenario, CAST(cost_usd AS DECIMAL(38,2)) AS cost_usd FROM base UNION ALL SELECT scenario, CAST(cost_usd AS DECIMAL(38,2)) AS cost_usd FROM per_prov WHERE array_contains(:param_sim_providers, target_provider) ORDER BY cost_usd DESC "
+      ],
+      "parameters": [
+        {
+          "displayName": "date_range",
+          "keyword": "date_range",
+          "dataType": "DATE",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATE",
+              "min": {
+                "value": "now-30d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        },
+        {
+          "displayName": "param_workspace",
+          "keyword": "param_workspace",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING"
+            }
+          }
+        },
+        {
+          "displayName": "param_models",
+          "keyword": "param_models",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING"
+            }
+          }
+        },
+        {
+          "displayName": "param_sim_providers",
+          "keyword": "param_sim_providers",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "Anthropic"
+                },
+                {
+                  "value": "OpenAI"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "ds_provider_sim_stacked",
+      "displayName": "Provider único — composição por modelo (empilhado)",
+      "queryLines": [
+        "WITH ref AS (SELECT * FROM perdomo_demos_catalog.ai_savings.v_model_ref WHERE on_databricks), real AS (   SELECT destination_model, SUM(input_tokens) inp, SUM(output_tokens) outp,          SUM(cache_read_input_tokens) cread, SUM(cache_creation_input_tokens) cwrite   FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily   WHERE (size(:param_workspace) = 0 OR array_contains(:param_workspace, workspace_name))     AND event_date BETWEEN :date_range.min AND :date_range.max     AND (size(:param_models) = 0 OR array_contains(:param_models, destination_model))   GROUP BY 1 ), real_aa AS (   SELECT r.*, ref.model r_model, ref.intelligence r_intel, ref.price_input rp_in, ref.price_output rp_out,          ref.price_cache_read rp_cr, ref.price_cache_write rp_cw   FROM real r JOIN ref ON r.destination_model = ref.slug_norm ), base AS (   SELECT '0 · Mix atual (direto)' AS scenario, r_model AS segment_model,          SUM((GREATEST(inp - cread - cwrite, 0) * rp_in + cread * COALESCE(rp_cr, rp_in)               + cwrite * COALESCE(rp_cw, rp_in) + outp * rp_out) / 1e6) AS cost_usd   FROM real_aa GROUP BY r_model ), cand AS (   SELECT ra.destination_model, ra.inp, ra.outp, ra.cread, ra.cwrite, ep.provider target_provider, ep.model target_model,          ep.price_input, ep.price_output, ep.price_cache_read pcr, ep.price_cache_write pcw,          ROW_NUMBER() OVER (PARTITION BY ra.destination_model, ep.provider                             ORDER BY ABS(ep.intelligence - ra.r_intel), ep.intelligence DESC) rn   FROM real_aa ra JOIN ref ep ON TRUE ), per_prov AS (   SELECT concat('Só ', target_provider) AS scenario, target_provider, target_model AS segment_model,          SUM((GREATEST(inp - cread - cwrite, 0) * price_input + cread * COALESCE(pcr, price_input)               + cwrite * COALESCE(pcw, price_input) + outp * price_output) / 1e6) AS cost_usd   FROM cand WHERE rn = 1 GROUP BY target_provider, target_model ) SELECT scenario, segment_model, CAST(cost_usd AS DECIMAL(38,2)) AS cost_usd FROM base UNION ALL SELECT scenario, segment_model, CAST(cost_usd AS DECIMAL(38,2)) AS cost_usd FROM per_prov WHERE array_contains(:param_sim_providers, target_provider) ORDER BY scenario, cost_usd DESC "
       ],
       "parameters": [
         {
@@ -312,7 +379,7 @@
       "name": "ds_provider_kpis",
       "displayName": "Provider único — cards",
       "queryLines": [
-        "WITH ref AS (SELECT * FROM perdomo_demos_catalog.ai_savings.v_aa_model_ref), real AS (   SELECT event_date, destination_model, SUM(input_tokens) inp, SUM(output_tokens) outp,          SUM(cache_read_input_tokens) cread, SUM(cache_creation_input_tokens) cwrite   FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily   WHERE (size(:param_workspace) = 0 OR array_contains(:param_workspace, workspace_name))     AND event_date BETWEEN :date_range.min AND :date_range.max     AND (size(:param_models) = 0 OR array_contains(:param_models, destination_model))   GROUP BY 1, 2 ), ra AS (SELECT r.*, ref.intelligence ri, ref.price_input pin, ref.price_output pout,               ref.price_cache_read pcr, ref.price_cache_write pcw        FROM real r JOIN ref ON r.destination_model = ref.slug_norm), equiv AS (SELECT destination_model, pi, po, pcr2, pcw2 FROM (     SELECT m.destination_model, ep.price_input pi, ep.price_output po,            ep.price_cache_read pcr2, ep.price_cache_write pcw2,            ROW_NUMBER() OVER (PARTITION BY m.destination_model                               ORDER BY ABS(ep.intelligence - m.ri), ep.intelligence DESC) rn     FROM (SELECT DISTINCT destination_model, ri FROM ra) m     JOIN ref ep ON ep.provider = :param_sim_provider) WHERE rn = 1) , dm AS (SELECT ra.destination_model,    (GREATEST(inp-cread-cwrite,0)*pin + cread*COALESCE(pcr,pin) + cwrite*COALESCE(pcw,pin) + outp*pout)/1e6 rc,    (GREATEST(inp-cread-cwrite,0)*e.pi + cread*COALESCE(e.pcr2,e.pi) + cwrite*COALESCE(e.pcw2,e.pi) + outp*e.po)/1e6 sc    FROM ra JOIN equiv e USING (destination_model)) SELECT CAST(SUM(rc) AS DECIMAL(38,2)) AS real_cost,        CAST(SUM(sc) AS DECIMAL(38,2)) AS sim_cost,        CAST(SUM(sc) - SUM(rc) AS DECIMAL(38,2)) AS savings FROM dm "
+        "WITH ref AS (SELECT * FROM perdomo_demos_catalog.ai_savings.v_model_ref WHERE on_databricks), real AS (   SELECT event_date, destination_model, SUM(input_tokens) inp, SUM(output_tokens) outp,          SUM(cache_read_input_tokens) cread, SUM(cache_creation_input_tokens) cwrite   FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily   WHERE (size(:param_workspace) = 0 OR array_contains(:param_workspace, workspace_name))     AND event_date BETWEEN :date_range.min AND :date_range.max     AND (size(:param_models) = 0 OR array_contains(:param_models, destination_model))   GROUP BY 1, 2 ), ra AS (SELECT r.*, ref.intelligence ri, ref.price_input pin, ref.price_output pout,               ref.price_cache_read pcr, ref.price_cache_write pcw        FROM real r JOIN ref ON r.destination_model = ref.slug_norm), equiv AS (SELECT destination_model, pi, po, pcr2, pcw2 FROM (     SELECT m.destination_model, ep.price_input pi, ep.price_output po,            ep.price_cache_read pcr2, ep.price_cache_write pcw2,            ROW_NUMBER() OVER (PARTITION BY m.destination_model                               ORDER BY ABS(ep.intelligence - m.ri), ep.intelligence DESC) rn     FROM (SELECT DISTINCT destination_model, ri FROM ra) m     JOIN ref ep ON ep.provider = :param_sim_provider) WHERE rn = 1) , dm AS (SELECT ra.destination_model,    (GREATEST(inp-cread-cwrite,0)*pin + cread*COALESCE(pcr,pin) + cwrite*COALESCE(pcw,pin) + outp*pout)/1e6 rc,    (GREATEST(inp-cread-cwrite,0)*e.pi + cread*COALESCE(e.pcr2,e.pi) + cwrite*COALESCE(e.pcw2,e.pi) + outp*e.po)/1e6 sc    FROM ra JOIN equiv e USING (destination_model)) SELECT CAST(SUM(rc) AS DECIMAL(38,2)) AS real_cost,        CAST(SUM(sc) AS DECIMAL(38,2)) AS sim_cost,        CAST(SUM(sc) - SUM(rc) AS DECIMAL(38,2)) AS savings FROM dm "
       ],
       "parameters": [
         {
@@ -375,7 +442,7 @@
       "name": "ds_provider_daily",
       "displayName": "Provider único — diário",
       "queryLines": [
-        "WITH ref AS (SELECT * FROM perdomo_demos_catalog.ai_savings.v_aa_model_ref), real AS (   SELECT event_date, destination_model, SUM(input_tokens) inp, SUM(output_tokens) outp,          SUM(cache_read_input_tokens) cread, SUM(cache_creation_input_tokens) cwrite   FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily   WHERE (size(:param_workspace) = 0 OR array_contains(:param_workspace, workspace_name))     AND event_date BETWEEN :date_range.min AND :date_range.max     AND (size(:param_models) = 0 OR array_contains(:param_models, destination_model))   GROUP BY 1, 2 ), ra AS (SELECT r.*, ref.intelligence ri, ref.price_input pin, ref.price_output pout,               ref.price_cache_read pcr, ref.price_cache_write pcw        FROM real r JOIN ref ON r.destination_model = ref.slug_norm), equiv AS (SELECT destination_model, pi, po, pcr2, pcw2 FROM (     SELECT m.destination_model, ep.price_input pi, ep.price_output po,            ep.price_cache_read pcr2, ep.price_cache_write pcw2,            ROW_NUMBER() OVER (PARTITION BY m.destination_model                               ORDER BY ABS(ep.intelligence - m.ri), ep.intelligence DESC) rn     FROM (SELECT DISTINCT destination_model, ri FROM ra) m     JOIN ref ep ON ep.provider = :param_sim_provider) WHERE rn = 1) , dm AS (SELECT ra.event_date, ra.destination_model,    CAST((GREATEST(inp-cread-cwrite,0)*pin + cread*COALESCE(pcr,pin) + cwrite*COALESCE(pcw,pin) + outp*pout)/1e6 AS DECIMAL(38,2)) cost_usd,    (GREATEST(inp-cread-cwrite,0)*e.pi + cread*COALESCE(e.pcr2,e.pi) + cwrite*COALESCE(e.pcw2,e.pi) + outp*e.po)/1e6 sc    FROM ra JOIN equiv e USING (destination_model)), daily_sim AS (SELECT event_date, SUM(sc) day_sim FROM dm GROUP BY 1) SELECT dm.event_date, dm.destination_model, dm.cost_usd,        CAST(ds.day_sim AS DECIMAL(38,2)) AS sim_cost_usd FROM dm JOIN daily_sim ds USING (event_date) ORDER BY dm.event_date "
+        "WITH ref AS (SELECT * FROM perdomo_demos_catalog.ai_savings.v_model_ref WHERE on_databricks), real AS (   SELECT event_date, destination_model, SUM(input_tokens) inp, SUM(output_tokens) outp,          SUM(cache_read_input_tokens) cread, SUM(cache_creation_input_tokens) cwrite   FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily   WHERE (size(:param_workspace) = 0 OR array_contains(:param_workspace, workspace_name))     AND event_date BETWEEN :date_range.min AND :date_range.max     AND (size(:param_models) = 0 OR array_contains(:param_models, destination_model))   GROUP BY 1, 2 ), ra AS (SELECT r.*, ref.intelligence ri, ref.price_input pin, ref.price_output pout,               ref.price_cache_read pcr, ref.price_cache_write pcw        FROM real r JOIN ref ON r.destination_model = ref.slug_norm), equiv AS (SELECT destination_model, pi, po, pcr2, pcw2 FROM (     SELECT m.destination_model, ep.price_input pi, ep.price_output po,            ep.price_cache_read pcr2, ep.price_cache_write pcw2,            ROW_NUMBER() OVER (PARTITION BY m.destination_model                               ORDER BY ABS(ep.intelligence - m.ri), ep.intelligence DESC) rn     FROM (SELECT DISTINCT destination_model, ri FROM ra) m     JOIN ref ep ON ep.provider = :param_sim_provider) WHERE rn = 1) , dm AS (SELECT ra.event_date, ra.destination_model,    CAST((GREATEST(inp-cread-cwrite,0)*pin + cread*COALESCE(pcr,pin) + cwrite*COALESCE(pcw,pin) + outp*pout)/1e6 AS DECIMAL(38,2)) cost_usd,    (GREATEST(inp-cread-cwrite,0)*e.pi + cread*COALESCE(e.pcr2,e.pi) + cwrite*COALESCE(e.pcw2,e.pi) + outp*e.po)/1e6 sc    FROM ra JOIN equiv e USING (destination_model)), daily_sim AS (SELECT event_date, SUM(sc) day_sim FROM dm GROUP BY 1) SELECT dm.event_date, dm.destination_model, dm.cost_usd,        CAST(ds.day_sim AS DECIMAL(38,2)) AS sim_cost_usd FROM dm JOIN daily_sim ds USING (event_date) ORDER BY dm.event_date "
       ],
       "parameters": [
         {
@@ -438,7 +505,7 @@
       "name": "ds_aa_table",
       "displayName": "Artificial Analysis — modelos",
       "queryLines": [
-        "SELECT provider, model, intelligence, blended_price, tokens_per_s FROM perdomo_demos_catalog.ai_savings.v_aa_model_ref ORDER BY intelligence DESC "
+        "SELECT provider, model, intelligence, blended_price, tokens_per_s FROM perdomo_demos_catalog.ai_savings.v_model_ref WHERE on_databricks ORDER BY intelligence DESC "
       ]
     },
     {
@@ -473,14 +540,14 @@
       "name": "ds_dim_providers",
       "displayName": "ds_dim_providers",
       "queryLines": [
-        "SELECT DISTINCT provider FROM perdomo_demos_catalog.ai_savings.v_aa_model_ref WHERE provider IS NOT NULL ORDER BY provider "
+        "SELECT DISTINCT provider FROM perdomo_demos_catalog.ai_savings.v_model_ref WHERE on_databricks AND provider IS NOT NULL ORDER BY provider "
       ]
     },
     {
       "name": "ds_dim_providers_sim",
       "displayName": "ds_dim_providers_sim",
       "queryLines": [
-        "SELECT DISTINCT provider FROM perdomo_demos_catalog.ai_savings.v_aa_model_ref WHERE provider IS NOT NULL ORDER BY provider "
+        "SELECT DISTINCT provider FROM perdomo_demos_catalog.ai_savings.v_model_ref WHERE on_databricks AND provider IS NOT NULL ORDER BY provider "
       ]
     }
   ],
@@ -583,6 +650,19 @@
                   ],
                   "disaggregated": false
                 }
+              },
+              {
+                "name": "dr_ds_provider_sim_stacked",
+                "query": {
+                  "datasetName": "ds_provider_sim_stacked",
+                  "parameters": [
+                    {
+                      "name": "date_range",
+                      "keyword": "date_range"
+                    }
+                  ],
+                  "disaggregated": false
+                }
               }
             ],
             "spec": {
@@ -617,6 +697,10 @@
                   {
                     "parameterName": "date_range",
                     "queryName": "dr_ds_harness"
+                  },
+                  {
+                    "parameterName": "date_range",
+                    "queryName": "dr_ds_provider_sim_stacked"
                   }
                 ]
               },
@@ -740,6 +824,19 @@
                   ],
                   "disaggregated": false
                 }
+              },
+              {
+                "name": "p_filter_workspace_ds_provider_sim_stacked",
+                "query": {
+                  "datasetName": "ds_provider_sim_stacked",
+                  "parameters": [
+                    {
+                      "name": "param_workspace",
+                      "keyword": "param_workspace"
+                    }
+                  ],
+                  "disaggregated": false
+                }
               }
             ],
             "spec": {
@@ -774,6 +871,10 @@
                   {
                     "parameterName": "param_workspace",
                     "queryName": "p_filter_workspace_ds_harness"
+                  },
+                  {
+                    "parameterName": "param_workspace",
+                    "queryName": "p_filter_workspace_ds_provider_sim_stacked"
                   },
                   {
                     "fieldName": "workspace_name",
@@ -902,6 +1003,19 @@
                   ],
                   "disaggregated": false
                 }
+              },
+              {
+                "name": "p_filter_models_ds_provider_sim_stacked",
+                "query": {
+                  "datasetName": "ds_provider_sim_stacked",
+                  "parameters": [
+                    {
+                      "name": "param_models",
+                      "keyword": "param_models"
+                    }
+                  ],
+                  "disaggregated": false
+                }
               }
             ],
             "spec": {
@@ -936,6 +1050,10 @@
                   {
                     "parameterName": "param_models",
                     "queryName": "p_filter_models_ds_harness"
+                  },
+                  {
+                    "parameterName": "param_models",
+                    "queryName": "p_filter_models_ds_provider_sim_stacked"
                   },
                   {
                     "fieldName": "destination_model",
@@ -994,6 +1112,19 @@
                   ],
                   "disaggregated": false
                 }
+              },
+              {
+                "name": "p_filter_sim_providers_ds_provider_sim_stacked",
+                "query": {
+                  "datasetName": "ds_provider_sim_stacked",
+                  "parameters": [
+                    {
+                      "name": "param_sim_providers",
+                      "keyword": "param_sim_providers"
+                    }
+                  ],
+                  "disaggregated": false
+                }
               }
             ],
             "spec": {
@@ -1004,6 +1135,10 @@
                   {
                     "parameterName": "param_sim_providers",
                     "queryName": "p_filter_sim_providers_ds_provider_sim"
+                  },
+                  {
+                    "parameterName": "param_sim_providers",
+                    "queryName": "p_filter_sim_providers_ds_provider_sim_stacked"
                   },
                   {
                     "fieldName": "provider",
@@ -1472,6 +1607,86 @@
           "position": {
             "x": 0,
             "y": 11,
+            "width": 12,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "chart_provider_total_stacked",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_provider_sim_stacked",
+                  "fields": [
+                    {
+                      "name": "scenario",
+                      "expression": "`scenario`"
+                    },
+                    {
+                      "name": "segment_model",
+                      "expression": "`segment_model`"
+                    },
+                    {
+                      "name": "sum(cost_usd)",
+                      "expression": "SUM(`cost_usd`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "scenario",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  },
+                  "displayName": "Cenário"
+                },
+                "y": {
+                  "fieldName": "sum(cost_usd)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Custo (USD)",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  }
+                },
+                "color": {
+                  "fieldName": "segment_model",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Modelo"
+                },
+                "label": {
+                  "show": false
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Composição por modelo: mix atual vs. cada provider único"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 17,
             "width": 12,
             "height": 6
           }

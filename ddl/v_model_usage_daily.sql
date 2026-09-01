@@ -7,9 +7,12 @@
 -- Custo real (mesma lógica validada do dashboard oficial AI Gateway Usage Analytics):
 --   * PPT / Databricks-hosted : system.billing.usage (usage_type='TOKEN', endpoint
 --     governado) x system.billing.list_prices  ->  DBU x preço ($/DBU).
---   * External Models         : system.ai_gateway.external_model_spend (já em USD).
 -- Tokens (input/output/cache) : system.ai_gateway.usage, espelhando os filtros do
 --   dashboard oficial (exclui AI_QUERY e MCP_SERVICE).
+--
+-- PREMISSA: todo consumo é via AI Gateway em modelos HOSPEDADOS na Databricks (PPT).
+-- Modelos externos (system.ai_gateway.external_model_spend) ficam FORA de escopo — o
+-- ramo em_cost foi removido. destination_type deixa de emitir 'External Model'.
 --
 -- View agnóstica de workspace (workspace_id é coluna) — o dashboard aplica o filtro.
 -- Escopo: apenas consumo cobrado por token; provisioned-throughput e batch ficam fora
@@ -41,22 +44,8 @@ ppt_cost AS (
     AND u.usage_metadata.ai_gateway.endpoint_name IS NOT NULL
   GROUP BY 1, 2, 3, 4
 ),
--- External models: custo já vem em USD.
-em_cost AS (
-  SELECT
-    usage_date AS event_date,
-    CAST(workspace_id AS STRING) AS workspace_id,
-    usage_metadata.endpoint_name AS endpoint_name,
-    LOWER(REGEXP_REPLACE(usage_metadata.model, '[ .]+', '-')) AS destination_model,
-    'External Model' AS destination_type,
-    CAST(SUM(usage_quantity) AS DECIMAL(38,6)) AS cost_usd
-  FROM system.ai_gateway.external_model_spend
-  GROUP BY 1, 2, 3, 4
-),
 cost_side AS (
   SELECT * FROM ppt_cost
-  UNION ALL
-  SELECT * FROM em_cost
 ),
 -- Tokens por tipo, do log de requisições do gateway.
 token_side AS (
