@@ -15,6 +15,12 @@ from .config import get_workspace_client, get_oauth_token
 _TOKEN_TTL = 45 * 60  # renova antes de expirar (~1h)
 _SCHEMA_SQL = pathlib.Path(__file__).resolve().parents[1] / "db" / "schema.sql"
 
+# O database `ai_savings` é dono do role `app_owner` (lakebase.yml); o app conecta como o
+# SP (outro role). No PG15+ o schema `public` não dá CREATE a outros roles, então o SP cria
+# um schema PRÓPRIO (tem CREATE no database via CAN_CONNECT_AND_CREATE) e a tabela mora nele.
+# O search_path do pool aponta pra cá, então as queries das rotas seguem usando `estimates`.
+_APP_SCHEMA = "app_data"
+
 def _norm_endpoint(p: str) -> str:
     """Normaliza o path do endpoint. O binding `lakebase` (valueFrom) entrega o resource
     path; se vier só a branch (sem /endpoints/), assume o endpoint `primary` dela."""
@@ -80,43 +86,46 @@ class DatabasePool:
     async def get_pool(self) -> asyncpg.Pool:
         if not _ENDPOINT_PATH and not os.environ.get("PGHOST"):
             raise RuntimeError("Lakebase não configurado — LAKEBASE_ENDPOINT_PATH ausente")
-        if self._pool is not None and (time.time() - self._token_ts) < _TOKEN_TTL:
-            return self._pool
-        if self._pool is not None:
-            await self._pool.close()
-            self._pool = None
-        # No App, PGUSER = service principal (client id) quando não informado explicitamente.
-        # Ignora PGUSER se vier como resource path (com '/') em vez de um usuário real.
-        pguser = os.environ.get("PGUSER", "")
-        if not pguser or "/" in pguser:
-            pguser = os.environ.get("DATABRICKS_CLIENT_ID", "")
-        self._pool = await asyncpg.create_pool(
-            host=_endpoint_host(),
-            port=5432,  # Lakebase Postgres é sempre 5432 (binding não injeta porta decomposta)
-            database=os.environ.get("PGDATABASE", "ai_savings"),
-            user=pguser,
-            password=_password(),
-            ssl="require",
-            min_size=1,
-            max_size=5,
-        )
-        self._token_ts = time.time()
+        # (Re)cria o pool na 1ª vez ou quando a credencial está para expirar.
+        if self._pool is None or (time.time() - self._token_ts) >= _TOKEN_TTL:
+            if self._pool is not None:
+                await self._pool.close()
+                self._pool = None
+            # No App, PGUSER = service principal (client id) quando não informado explicitamente.
+            # Ignora PGUSER se vier como resource path (com '/') em vez de um usuário real.
+            pguser = os.environ.get("PGUSER", "")
+            if not pguser or "/" in pguser:
+                pguser = os.environ.get("DATABRICKS_CLIENT_ID", "")
+            self._pool = await asyncpg.create_pool(
+                host=_endpoint_host(),
+                port=5432,  # Lakebase Postgres é sempre 5432 (binding não injeta porta decomposta)
+                database=os.environ.get("PGDATABASE", "ai_savings"),
+                user=pguser,
+                password=_password(),
+                ssl="require",
+                min_size=1,
+                max_size=5,
+                # Toda conexão enxerga o schema próprio do app primeiro (ver _APP_SCHEMA).
+                server_settings={"search_path": f"{_APP_SCHEMA},public"},
+            )
+            self._token_ts = time.time()
+        # Roda em toda chamada, mas retorna cedo quando já pronto; se a criação falhou antes
+        # (_schema_ready == False), tenta de novo em vez de mascarar com "relation does not exist".
         await self._ensure_schema()
         return self._pool
 
     async def _ensure_schema(self) -> None:
-        """Cria a tabela `estimates` no 1º uso (idempotente). O SP conecta com
-        CAN_CONNECT_AND_CREATE e vira dono da tabela → read/write sem grant extra.
-        Dispensa o script init_lakebase.py no fluxo de deploy."""
+        """Cria o schema próprio do app + a tabela `estimates` (idempotente). O SP tem CREATE
+        no database (CAN_CONNECT_AND_CREATE) e vira dono do schema/tabela → read/write sem grant.
+        Falha ALTO (propaga): só as rotas /estimates dependem disto; o resto do app segue de pé,
+        e o /logz mostra a causa real em vez do downstream UndefinedTableError."""
         if self._schema_ready or self._pool is None:
             return
-        try:
-            sql = _SCHEMA_SQL.read_text()
-            async with self._pool.acquire() as conn:
-                await conn.execute(sql)  # asyncpg (simple protocol) roda múltiplos statements
-            self._schema_ready = True
-        except Exception as e:  # não derruba o app; loga e segue
-            print(f"init do schema Lakebase falhou (segue mesmo assim): {e}")
+        ddl = _SCHEMA_SQL.read_text()
+        async with self._pool.acquire() as conn:
+            await conn.execute(f"CREATE SCHEMA IF NOT EXISTS {_APP_SCHEMA}")
+            await conn.execute(ddl)  # search_path já aponta pro schema próprio
+        self._schema_ready = True
 
 
 db = DatabasePool()
