@@ -29,7 +29,7 @@ export function Budget({ result, budget, onChange }: Props) {
 
         {tiers.map((t) => {
           const b = budget[t.tier] || { pct_alvo: t.pct_atual, pct_optimizable: 0 };
-          const opt = t.target.optimized;
+          const subs = t.models_detail.filter((m) => m.substitute);
           return (
             <div className="brow" key={t.tier} style={{ display: "contents" }}>
               <div className="bcell btier">
@@ -46,11 +46,15 @@ export function Budget({ result, budget, onChange }: Props) {
                 <PctInput value={b.pct_optimizable} onChange={(v) => set(t.tier, "pct_optimizable", v)} accent />
               </div>
               <div className="bcell bsub">
-                {b.pct_optimizable > 0 && opt ? (
-                  <span className="sub-pill" style={{ borderColor: OPTIMIZED_COLOR }}>
-                    <span className="tier-dot" style={{ background: OPTIMIZED_COLOR }} />
-                    {opt.model}{opt.provider ? ` · ${opt.provider}` : ""}
-                  </span>
+                {b.pct_optimizable > 0 && subs.length > 0 ? (
+                  <div className="sub-list">
+                    {subs.map((m) => (
+                      <span className="sub-pill" key={m.slug} style={{ borderColor: OPTIMIZED_COLOR }}>
+                        <span className="tier-dot" style={{ background: OPTIMIZED_COLOR }} />
+                        {m.model} → {m.substitute!.model}{m.substitute!.provider ? ` · ${m.substitute!.provider}` : ""}
+                      </span>
+                    ))}
+                  </div>
                 ) : (
                   <span className="note">—</span>
                 )}

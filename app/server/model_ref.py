@@ -14,7 +14,7 @@ _cache: dict = {"rows": None, "ts": 0.0}
 _COLS = [
     "slug_norm", "model", "slug", "provider", "intelligence",
     "price_input", "price_output", "price_cache_read", "price_cache_write",
-    "blended_price", "tokens_per_s", "on_databricks", "databricks_endpoint",
+    "blended_price", "tokens_per_s", "match_key", "on_databricks", "databricks_endpoint",
 ]
 
 

@@ -71,8 +71,9 @@ def test_otimizacao_total_do_tier_alta():
     assert round(res["target_cost"], 6) == 8.0
     assert round(res["savings"], 6) == 36.0
     assert round(res["savings_pct"], 1) == 81.8
-    opt = _tier(res, "alta")["target"]["optimized"]
-    assert opt["model"] == "Cheap Alta"  # NÃO "Cheap Off" (fora da Databricks)
+    # de-para por modelo: Model A -> Cheap Alta (não Cheap Off, fora da Databricks)
+    sub = _tier(res, "alta")["models_detail"][0]["substitute"]
+    assert sub["model"] == "Cheap Alta"
 
 
 def test_rebalanceamento_sem_otimizacao():
@@ -104,6 +105,38 @@ def test_modelo_sem_match_gera_warning():
     assert any("Inexistente XYZ" in w for w in res["warnings"])
     assert res["baseline_cost"] == 44.0  # o inexistente não entra no custo
     assert res["reported_spend"] == 143.0  # mas seu gasto reportado conta na âncora
+
+
+def test_de_para_por_modelo_independente():
+    # Dois modelos no MESMO tier (Alta) com recomendações diferentes: o piso é a
+    # intelligence de cada modelo - 3, não a média do tier.
+    ref = REF + [
+        {"slug_norm": "model-d", "model": "Model D", "provider": "X", "intelligence": 52.0,
+         "price_input": 8.0, "price_output": 24.0, "price_cache_read": None,
+         "price_cache_write": None, "on_databricks": True},
+        {"slug_norm": "cheap-mid", "model": "Cheap Mid", "provider": "OSS", "intelligence": 51.0,
+         "price_input": 0.5, "price_output": 1.5, "price_cache_read": None,
+         "price_cache_write": None, "on_databricks": True},
+    ]
+    inputs = [
+        {"model": "Model A", "input": 1 * M, "output": 1 * M, "cache_read": 0, "cache_write": 0, "spend_usd": 0},
+        {"model": "Model D", "input": 1 * M, "output": 1 * M, "cache_read": 0, "cache_write": 0, "spend_usd": 0},
+    ]
+    res = engine.compute(inputs, {"alta": {"pct_alvo": 100, "pct_optimizable": 100}}, ref)
+    sub = {d["model"]: d["substitute"]["model"] for d in _tier(res, "alta")["models_detail"] if d["substitute"]}
+    assert sub["Model A"] == "Cheap Alta"  # piso 57 -> só Cheap Alta (58) qualifica
+    assert sub["Model D"] == "Cheap Mid"   # piso 49 -> Cheap Mid (51) é mais barato
+
+
+def test_norm_slug_particao():
+    # gêmeo Python da expressão match_key das views: precisam bater sempre.
+    assert engine.norm_slug("Claude Opus 4.8") == "claude-opus-4-8"
+    # recupera divergência de ORDEM AA<->Databricks
+    assert engine.norm_slug("claude-4-5-sonnet") == engine.norm_slug("claude-sonnet-4-5")
+    # NÃO colide inversão de versão (ordem dos números preservada)
+    assert engine.norm_slug("claude-sonnet-4-5") != engine.norm_slug("claude-sonnet-5-4")
+    # underscore/espaço colapsam igual
+    assert engine.norm_slug("databricks_claude_opus_4_8") == "databricks-claude-opus-4-8"
 
 
 def test_default_budget():

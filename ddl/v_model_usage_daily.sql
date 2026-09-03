@@ -31,7 +31,7 @@ ppt_cost AS (
     u.usage_date AS event_date,
     CAST(u.workspace_id AS STRING) AS workspace_id,
     u.usage_metadata.ai_gateway.endpoint_name AS endpoint_name,
-    LOWER(REGEXP_REPLACE(u.usage_metadata.ai_gateway.destination_model, '[ .]+', '-')) AS destination_model,
+    LOWER(REGEXP_REPLACE(TRIM(u.usage_metadata.ai_gateway.destination_model), '[ ._]+', '-')) AS destination_model,
     'Pay Per Token' AS destination_type,
     CAST(SUM(u.usage_quantity * p.pricing.effective_list.default) AS DECIMAL(38,6)) AS cost_usd
   FROM system.billing.usage u
@@ -53,7 +53,7 @@ token_side AS (
     DATE(event_time) AS event_date,
     CAST(workspace_id AS STRING) AS workspace_id,
     endpoint_name,
-    LOWER(REGEXP_REPLACE(destination_model, '[ .]+', '-')) AS destination_model,
+    LOWER(REGEXP_REPLACE(TRIM(destination_model), '[ ._]+', '-')) AS destination_model,
     SUM(input_tokens)  AS input_tokens,
     SUM(output_tokens) AS output_tokens,
     SUM(total_tokens)  AS total_tokens,
@@ -77,6 +77,11 @@ SELECT
   COALESCE(ws.workspace_name, COALESCE(c.workspace_id, t.workspace_id)) AS workspace_name,
   COALESCE(c.endpoint_name, t.endpoint_name)       AS endpoint_name,
   COALESCE(c.destination_model, t.destination_model) AS destination_model,
+  -- chave de reconciliação com a AA (mesma partição estável de v_aa_model_ref)
+  concat_ws('-',
+    nullif(array_join(filter(split(COALESCE(c.destination_model, t.destination_model), '-'), x -> NOT x rlike '^[0-9]+$'), '-'), ''),
+    nullif(array_join(filter(split(COALESCE(c.destination_model, t.destination_model), '-'), x ->     x rlike '^[0-9]+$'), '-'), '')
+  ) AS match_key,
   COALESCE(c.destination_type, 'Unknown')          AS destination_type,
   CAST(COALESCE(c.cost_usd, 0) AS DECIMAL(38,6))    AS cost_usd,
   COALESCE(t.input_tokens, 0)                       AS input_tokens,

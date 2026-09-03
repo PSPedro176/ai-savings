@@ -84,6 +84,7 @@
 .pct-input input::-webkit-outer-spin-button, .pct-input input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .pct-input span { color: var(--ink-3); font-size: 13px; font-weight: 600; }
 .pct-input:focus-within { box-shadow: 0 0 0 3px color-mix(in oklab, var(--navy) 18%, transparent); }
+.sub-list { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
 .sub-pill { display: inline-flex; align-items: center; gap: 7px; border: 1px solid; border-radius: 999px; padding: 4px 12px 4px 8px; font-size: 13px; font-weight: 600; color: var(--ink); background: var(--lava-wash); }
 .budget-foot { display: flex; align-items: center; gap: var(--space-md); margin-top: 14px; flex-wrap: wrap; }
 .sum-badge { font-size: 13px; padding: 6px 12px; border-radius: 999px; font-weight: 600; }
@@ -123,8 +124,14 @@
 .leg { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--ink-2); font-weight: 600; }
 
 /* ---- embed do dashboard ---- */
+.track { overflow: hidden; }
 .embed-frame { overflow: hidden; padding: 0; }
 .embed-frame iframe { width: 100%; height: 78vh; border: 0; display: block; }
+.track > .embed-frame {
+  margin-left: calc(-50vw + 50%);
+  margin-right: calc(-50vw + 50%);
+  width: 100vw;
+}
 .embed-empty { padding: var(--space-3xl) var(--space-lg); display: grid; place-items: center; text-align: center; }
 .embed-empty-inner { max-width: 46ch; display: grid; gap: 12px; justify-items: center; }
 
@@ -134,4 +141,9 @@
   .budget-grid .bhead { display: none; }
   .bcell { border-right: 0; }
   .chart-top { flex-direction: column; }
+  .track > .embed-frame {
+    width: calc(100% + 2 * var(--space-lg));
+    margin-left: calc(-1 * var(--space-lg));
+    margin-right: calc(-1 * var(--space-lg));
+  }
 }

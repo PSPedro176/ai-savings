@@ -5,22 +5,26 @@
 -- precisa: performance (intelligence) e preços diretos por 1M tokens
 -- (input, output, cache-hit=leitura, cache-write=escrita).
 --
--- Chave de join com o consumo real: `slug_norm` = slug normalizado igual à
--- v_model_usage_daily (LOWER(REGEXP_REPLACE(x,'[ .]+','-'))) — casa direto com
--- destination_model na maioria dos modelos.
+-- CHAVE DE JOIN = `match_key` (partição estável): normaliza o slug (LOWER + TRIM +
+-- '[ ._]+' -> '-'), quebra em tokens e reagrupa LETRAS (na ordem) ++ NÚMEROS (na
+-- ordem). Isso reconcilia a divergência de ORDEM entre a AA e a Databricks
+-- (ex.: AA `claude-4-5-sonnet` vs Databricks `claude-sonnet-4-5`) SEM colidir
+-- inversões de versão (`4-5` != `5-4`, pois a ordem dos números é preservada) e
+-- SEM nenhum mapeamento manual. `slug_norm` continua como identidade/display.
 --
 -- Só modelos "chat" com performance e preço (intelligence e price_input não nulos) —
 -- embeddings e afins caem fora naturalmente.
 --
 -- COLAPSO DE ESFORÇO/REASONING: a API free da AA lista cada nível de esforço como um
--- "modelo" separado (ex.: "GPT-5.6 Sol (low|medium|high|xhigh|max)"), com MESMO preço
+-- "modelo" separado (ex.: "GPT-5.6 Sol (low|medium|high|xhigh)"), com MESMO preço
 -- por token e só a `intelligence` variando. Como aqui medimos apenas TOKENS (o custo por
 -- token independe do esforço), colapsamos para 1 linha por (provider, modelo-base):
 --   * modelo-base = nome sem o sufixo entre parênteses;
---   * representante = slug mais curto (o canônico, que casa com o uso real do gateway),
---     desempate pela maior intelligence (melhor esforço);
---   * `model` passa a exibir o nome-base limpo (sem "(max)"/"(high)"...).
--- Schema inalterado. ~418 -> ~286 linhas.
+--   * representante = slug mais curto (o canônico, que casa com o uso real do gateway);
+--   * `intelligence` = **MAX** entre as variantes de esforço da base (capacidade do
+--     modelo no seu melhor esforço) — antes herdava a do slug curto, que podia ser a
+--     variante fraca (ex.: Claude Sonnet 4.6 pegava 36.8 em vez de 48.4).
+--   * `model` exibe o nome-base limpo (sem "(max)"/"(high)"...).
 -- =============================================================================
 CREATE OR REPLACE VIEW perdomo_demos_catalog.ai_savings.v_aa_model_ref AS
 WITH latest AS (
@@ -29,7 +33,7 @@ WITH latest AS (
 ),
 parsed AS (
   SELECT
-    LOWER(REGEXP_REPLACE(slug, '[ .]+', '-')) AS slug_norm,
+    LOWER(REGEXP_REPLACE(TRIM(slug), '[ ._]+', '-')) AS slug_norm,
     TRIM(REGEXP_REPLACE(model, '\\s*\\(.*\\)\\s*$', '')) AS base_model,
     slug,
     provider,
@@ -45,10 +49,11 @@ parsed AS (
     AND price_input IS NOT NULL
     AND slug IS NOT NULL
 ),
--- 1 representante por (provider, modelo-base): slug canônico (mais curto) primeiro,
--- desempate pela maior intelligence (melhor nível de esforço).
+-- 1 representante por (provider, modelo-base): slug canônico (mais curto) para casar com
+-- o uso real; intelligence = MAX entre as variantes de esforço.
 ranked AS (
   SELECT *,
+    MAX(intelligence) OVER (PARTITION BY provider, base_model) AS max_intel,
     ROW_NUMBER() OVER (
       PARTITION BY provider, base_model
       ORDER BY LENGTH(slug_norm) ASC, intelligence DESC
@@ -60,12 +65,17 @@ SELECT
   base_model AS model,
   slug,
   provider,
-  intelligence,
+  max_intel AS intelligence,
   price_input,
   price_output,
   price_cache_read,
   price_cache_write,
   blended_price,
-  tokens_per_s
+  tokens_per_s,
+  -- partição estável: letras (na ordem) ++ números (na ordem)
+  concat_ws('-',
+    nullif(array_join(filter(split(slug_norm, '-'), t -> NOT t rlike '^[0-9]+$'), '-'), ''),
+    nullif(array_join(filter(split(slug_norm, '-'), t ->     t rlike '^[0-9]+$'), '-'), '')
+  ) AS match_key
 FROM ranked
 WHERE rn = 1;

@@ -4,7 +4,7 @@
       "name": "ds_usage_daily",
       "displayName": "Consumo diário por modelo + comparação",
       "queryLines": [
-        "WITH scoped AS (   SELECT * FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily   WHERE (size(:param_workspace) = 0 OR array_contains(:param_workspace, workspace_name)) ), base AS (   SELECT * FROM scoped   WHERE event_date BETWEEN :date_range.min AND :date_range.max     AND (size(:param_models) = 0 OR array_contains(:param_models, destination_model)) ), sim_rate AS (   SELECT CAST(SUM(cost_usd) AS DOUBLE) / NULLIF(SUM(total_tokens), 0) AS rate  FROM scoped WHERE destination_model = :param_sim_model ), daily AS (   SELECT event_date, SUM(total_tokens) AS day_tokens FROM base GROUP BY event_date ) SELECT   b.event_date,   b.destination_model,   CAST(SUM(b.cost_usd) AS DECIMAL(38,2)) AS cost_usd,   SUM(b.total_tokens) AS total_tokens,   CAST(MIN(d.day_tokens) * MIN(s.rate) AS DECIMAL(38,2)) AS sim_cost_usd FROM base b JOIN daily d ON b.event_date = d.event_date CROSS JOIN sim_rate s GROUP BY b.event_date, b.destination_model ORDER BY b.event_date "
+        "WITH base AS (\n  SELECT * FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily\n  WHERE (size(:param_workspace) = 0 OR array_contains(:param_workspace, workspace_name)) AND event_date BETWEEN :date_range.min AND :date_range.max AND (size(:param_models) = 0 OR array_contains(:param_models, destination_model))\n),\ntgt AS (SELECT price_input pin, price_output pout, price_cache_read pcr, price_cache_write pcw\n        FROM perdomo_demos_catalog.ai_savings.v_model_ref WHERE match_key = concat_ws('-', nullif(array_join(filter(split(lower(regexp_replace(trim(:param_sim_model), '[ ._]+', '-')),'-'), t -> NOT t rlike '^[0-9]+$'),'-'),''), nullif(array_join(filter(split(lower(regexp_replace(trim(:param_sim_model), '[ ._]+', '-')),'-'), t -> t rlike '^[0-9]+$'),'-'),''))),\ndaily_tok AS (\n  SELECT event_date,\n         SUM(GREATEST(input_tokens - cache_read_input_tokens - cache_creation_input_tokens, 0)) inp_pure,\n         SUM(cache_read_input_tokens) cread, SUM(cache_creation_input_tokens) cwrite, SUM(output_tokens) outp\n  FROM base GROUP BY event_date\n),\ndaily_sim AS (\n  SELECT d.event_date, (GREATEST(d.inp_pure - d.cread - d.cwrite, 0)*t.pin + d.cread*COALESCE(t.pcr,t.pin) + d.cwrite*COALESCE(t.pcw,t.pin) + d.outp*t.pout)/1e6 AS sim_cost\n  FROM daily_tok d LEFT JOIN tgt t ON TRUE\n)\nSELECT b.event_date, b.destination_model,\n       CAST(SUM(b.cost_usd) AS DECIMAL(38,2)) AS cost_usd,\n       SUM(b.total_tokens) AS total_tokens,\n       CAST(MIN(s.sim_cost) AS DECIMAL(38,2)) AS sim_cost_usd\nFROM base b JOIN daily_sim s ON b.event_date = s.event_date\nGROUP BY b.event_date, b.destination_model\nORDER BY b.event_date "
       ],
       "parameters": [
         {
@@ -67,7 +67,7 @@
       "name": "ds_kpis",
       "displayName": "KPIs: real, estimado, economia",
       "queryLines": [
-        "WITH scoped AS (   SELECT * FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily   WHERE (size(:param_workspace) = 0 OR array_contains(:param_workspace, workspace_name)) ), base AS (   SELECT * FROM scoped   WHERE event_date BETWEEN :date_range.min AND :date_range.max     AND (size(:param_models) = 0 OR array_contains(:param_models, destination_model)) ), sim_rate AS (   SELECT CAST(SUM(cost_usd) AS DOUBLE) / NULLIF(SUM(total_tokens), 0) AS rate   FROM scoped WHERE destination_model = :param_sim_model ) SELECT   CAST(SUM(base.cost_usd) AS DECIMAL(38,2)) AS real_cost,   CAST(SUM(base.total_tokens) * MIN(sim_rate.rate) AS DECIMAL(38,2)) AS sim_cost,   CAST(SUM(base.total_tokens) * MIN(sim_rate.rate) - SUM(base.cost_usd) AS DECIMAL(38,2)) AS savings FROM base CROSS JOIN sim_rate "
+        "WITH base AS (\n  SELECT * FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily\n  WHERE (size(:param_workspace) = 0 OR array_contains(:param_workspace, workspace_name)) AND event_date BETWEEN :date_range.min AND :date_range.max AND (size(:param_models) = 0 OR array_contains(:param_models, destination_model))\n),\ntok AS (\n  SELECT SUM(GREATEST(input_tokens - cache_read_input_tokens - cache_creation_input_tokens, 0)) AS inp_pure,\n         SUM(cache_read_input_tokens) AS cread, SUM(cache_creation_input_tokens) AS cwrite,\n         SUM(output_tokens) AS outp, CAST(SUM(cost_usd) AS DOUBLE) AS real_cost\n  FROM base\n),\ntgt AS (SELECT price_input pin, price_output pout, price_cache_read pcr, price_cache_write pcw\n        FROM perdomo_demos_catalog.ai_savings.v_model_ref WHERE match_key = concat_ws('-', nullif(array_join(filter(split(lower(regexp_replace(trim(:param_sim_model), '[ ._]+', '-')),'-'), t -> NOT t rlike '^[0-9]+$'),'-'),''), nullif(array_join(filter(split(lower(regexp_replace(trim(:param_sim_model), '[ ._]+', '-')),'-'), t -> t rlike '^[0-9]+$'),'-'),'')))\nSELECT CAST(tok.real_cost AS DECIMAL(38,2)) AS real_cost,\n       CAST((GREATEST(tok.inp_pure - tok.cread - tok.cwrite, 0)*tgt.pin + tok.cread*COALESCE(tgt.pcr,tgt.pin) + tok.cwrite*COALESCE(tgt.pcw,tgt.pin) + tok.outp*tgt.pout)/1e6 AS DECIMAL(38,2)) AS sim_cost,\n       CAST((GREATEST(tok.inp_pure - tok.cread - tok.cwrite, 0)*tgt.pin + tok.cread*COALESCE(tgt.pcr,tgt.pin) + tok.cwrite*COALESCE(tgt.pcw,tgt.pin) + tok.outp*tgt.pout)/1e6 - tok.real_cost AS DECIMAL(38,2)) AS savings\nFROM tok LEFT JOIN tgt ON TRUE "
       ],
       "parameters": [
         {
@@ -130,7 +130,7 @@
       "name": "ds_compare",
       "displayName": "Comparativo do período: real vs. modelo único",
       "queryLines": [
-        "WITH scoped AS (   SELECT * FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily   WHERE (size(:param_workspace) = 0 OR array_contains(:param_workspace, workspace_name)) ), base AS (   SELECT * FROM scoped   WHERE event_date BETWEEN :date_range.min AND :date_range.max     AND (size(:param_models) = 0 OR array_contains(:param_models, destination_model)) ), totals AS (SELECT SUM(total_tokens) AS tt, SUM(cost_usd) AS rc FROM base), rates AS (   SELECT destination_model, CAST(SUM(cost_usd) AS DOUBLE) / NULLIF(SUM(total_tokens), 0) AS rate  FROM scoped GROUP BY destination_model ) SELECT '0 · Real (mix atual)' AS scenario, CAST((SELECT rc FROM totals) AS DECIMAL(38,2)) AS cost_usd UNION ALL SELECT concat('Só ', r.destination_model) AS scenario,        CAST((SELECT tt FROM totals) * r.rate AS DECIMAL(38,2)) AS cost_usd FROM rates r WHERE array_contains(:param_compare_models, r.destination_model) ORDER BY scenario "
+        "WITH base AS (\n  SELECT * FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily\n  WHERE (size(:param_workspace) = 0 OR array_contains(:param_workspace, workspace_name)) AND event_date BETWEEN :date_range.min AND :date_range.max AND (size(:param_models) = 0 OR array_contains(:param_models, destination_model))\n),\ntok AS (\n  SELECT SUM(GREATEST(input_tokens - cache_read_input_tokens - cache_creation_input_tokens, 0)) AS inp_pure,\n         SUM(cache_read_input_tokens) AS cread, SUM(cache_creation_input_tokens) AS cwrite,\n         SUM(output_tokens) AS outp, CAST(SUM(cost_usd) AS DOUBLE) AS real_cost\n  FROM base\n),\ncmp_keys AS (SELECT concat_ws('-', nullif(array_join(filter(split(lower(regexp_replace(trim(m), '[ ._]+', '-')),'-'), t -> NOT t rlike '^[0-9]+$'),'-'),''), nullif(array_join(filter(split(lower(regexp_replace(trim(m), '[ ._]+', '-')),'-'), t -> t rlike '^[0-9]+$'),'-'),'')) AS mk FROM (SELECT explode(:param_compare_models) AS m)),\nref AS (SELECT match_key, model, price_input, price_output, price_cache_read, price_cache_write\n        FROM perdomo_demos_catalog.ai_savings.v_model_ref WHERE match_key IN (SELECT mk FROM cmp_keys))\nSELECT '0 · Mix atual (real Databricks)' AS scenario, CAST((SELECT real_cost FROM tok) AS DECIMAL(38,2)) AS cost_usd\nUNION ALL\nSELECT concat('Só ', r.model) AS scenario,\n       CAST((GREATEST(t.inp_pure - t.cread - t.cwrite, 0)*r.price_input + t.cread*COALESCE(r.price_cache_read,r.price_input) + t.cwrite*COALESCE(r.price_cache_write,r.price_input) + t.outp*r.price_output)/1e6 AS DECIMAL(38,2)) AS cost_usd\nFROM ref r CROSS JOIN tok t\nORDER BY scenario "
       ],
       "parameters": [
         {
@@ -245,7 +245,7 @@
       "name": "ds_provider_sim",
       "displayName": "Comparação por provider único (preço direto)",
       "queryLines": [
-        "WITH ref AS (SELECT * FROM perdomo_demos_catalog.ai_savings.v_model_ref WHERE on_databricks), real AS (   SELECT destination_model, SUM(input_tokens) inp, SUM(output_tokens) outp,          SUM(cache_read_input_tokens) cread, SUM(cache_creation_input_tokens) cwrite   FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily   WHERE (size(:param_workspace) = 0 OR array_contains(:param_workspace, workspace_name))     AND event_date BETWEEN :date_range.min AND :date_range.max     AND (size(:param_models) = 0 OR array_contains(:param_models, destination_model))   GROUP BY 1 ), real_aa AS (   SELECT r.*, ref.intelligence r_intel, ref.price_input rp_in, ref.price_output rp_out,          ref.price_cache_read rp_cr, ref.price_cache_write rp_cw   FROM real r JOIN ref ON r.destination_model = ref.slug_norm ), base AS (   SELECT '0 · Mix atual (direto)' AS scenario,          SUM((GREATEST(inp - cread - cwrite, 0) * rp_in + cread * COALESCE(rp_cr, rp_in)               + cwrite * COALESCE(rp_cw, rp_in) + outp * rp_out) / 1e6) AS cost_usd   FROM real_aa ), cand AS (   SELECT ra.destination_model, ra.inp, ra.outp, ra.cread, ra.cwrite, ep.provider target_provider,          ep.price_input, ep.price_output, ep.price_cache_read pcr, ep.price_cache_write pcw,          ROW_NUMBER() OVER (PARTITION BY ra.destination_model, ep.provider                             ORDER BY ABS(ep.intelligence - ra.r_intel), ep.intelligence DESC) rn   FROM real_aa ra JOIN ref ep ON TRUE ), per_prov AS (   SELECT concat('Só ', target_provider) AS scenario, target_provider,          SUM((GREATEST(inp - cread - cwrite, 0) * price_input + cread * COALESCE(pcr, price_input)               + cwrite * COALESCE(pcw, price_input) + outp * price_output) / 1e6) AS cost_usd   FROM cand WHERE rn = 1 GROUP BY target_provider ) SELECT scenario, CAST(cost_usd AS DECIMAL(38,2)) AS cost_usd FROM base UNION ALL SELECT scenario, CAST(cost_usd AS DECIMAL(38,2)) AS cost_usd FROM per_prov WHERE array_contains(:param_sim_providers, target_provider) ORDER BY cost_usd DESC "
+        "WITH ref AS (SELECT * FROM perdomo_demos_catalog.ai_savings.v_model_ref WHERE on_databricks),\nbase AS (\n  SELECT destination_model, match_key, SUM(input_tokens) inp, SUM(output_tokens) outp,\n         SUM(cache_read_input_tokens) cread, SUM(cache_creation_input_tokens) cwrite,\n         CAST(SUM(cost_usd) AS DOUBLE) real_cost\n  FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily\n  WHERE (size(:param_workspace) = 0 OR array_contains(:param_workspace, workspace_name)) AND event_date BETWEEN :date_range.min AND :date_range.max AND (size(:param_models) = 0 OR array_contains(:param_models, destination_model))\n  GROUP BY 1, 2\n),\nra AS (SELECT b.*, ref.intelligence ri FROM base b JOIN ref ON b.match_key = ref.match_key),\nmix AS (SELECT CAST(SUM(real_cost) AS DECIMAL(38,2)) cost_usd FROM base),\ncand AS (\n  SELECT ra.match_key, ra.inp, ra.outp, ra.cread, ra.cwrite, ep.provider target_provider,\n         ep.price_input pin, ep.price_output pout, ep.price_cache_read pcr, ep.price_cache_write pcw,\n         ROW_NUMBER() OVER (PARTITION BY ra.match_key, ep.provider ORDER BY ABS(ep.intelligence - ra.ri), ep.intelligence DESC) rn\n  FROM ra JOIN ref ep ON TRUE\n),\nper_prov AS (\n  SELECT concat('Só ', target_provider) scenario, target_provider,\n         SUM((GREATEST(inp - cread - cwrite, 0)*pin + cread*COALESCE(pcr,pin) + cwrite*COALESCE(pcw,pin) + outp*pout)/1e6) cost_usd\n  FROM cand WHERE rn = 1 GROUP BY target_provider\n)\nSELECT '0 · Mix atual (real Databricks)' AS scenario, cost_usd FROM mix\nUNION ALL\nSELECT scenario, CAST(cost_usd AS DECIMAL(38,2)) FROM per_prov WHERE array_contains(:param_sim_providers, target_provider)\nORDER BY cost_usd DESC "
       ],
       "parameters": [
         {
@@ -312,7 +312,7 @@
       "name": "ds_provider_sim_stacked",
       "displayName": "Provider único — composição por modelo (empilhado)",
       "queryLines": [
-        "WITH ref AS (SELECT * FROM perdomo_demos_catalog.ai_savings.v_model_ref WHERE on_databricks), real AS (   SELECT destination_model, SUM(input_tokens) inp, SUM(output_tokens) outp,          SUM(cache_read_input_tokens) cread, SUM(cache_creation_input_tokens) cwrite   FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily   WHERE (size(:param_workspace) = 0 OR array_contains(:param_workspace, workspace_name))     AND event_date BETWEEN :date_range.min AND :date_range.max     AND (size(:param_models) = 0 OR array_contains(:param_models, destination_model))   GROUP BY 1 ), real_aa AS (   SELECT r.*, ref.model r_model, ref.intelligence r_intel, ref.price_input rp_in, ref.price_output rp_out,          ref.price_cache_read rp_cr, ref.price_cache_write rp_cw   FROM real r JOIN ref ON r.destination_model = ref.slug_norm ), base AS (   SELECT '0 · Mix atual (direto)' AS scenario, r_model AS segment_model,          SUM((GREATEST(inp - cread - cwrite, 0) * rp_in + cread * COALESCE(rp_cr, rp_in)               + cwrite * COALESCE(rp_cw, rp_in) + outp * rp_out) / 1e6) AS cost_usd   FROM real_aa GROUP BY r_model ), cand AS (   SELECT ra.destination_model, ra.inp, ra.outp, ra.cread, ra.cwrite, ep.provider target_provider, ep.model target_model,          ep.price_input, ep.price_output, ep.price_cache_read pcr, ep.price_cache_write pcw,          ROW_NUMBER() OVER (PARTITION BY ra.destination_model, ep.provider                             ORDER BY ABS(ep.intelligence - ra.r_intel), ep.intelligence DESC) rn   FROM real_aa ra JOIN ref ep ON TRUE ), per_prov AS (   SELECT concat('Só ', target_provider) AS scenario, target_provider, target_model AS segment_model,          SUM((GREATEST(inp - cread - cwrite, 0) * price_input + cread * COALESCE(pcr, price_input)               + cwrite * COALESCE(pcw, price_input) + outp * price_output) / 1e6) AS cost_usd   FROM cand WHERE rn = 1 GROUP BY target_provider, target_model ) SELECT scenario, segment_model, CAST(cost_usd AS DECIMAL(38,2)) AS cost_usd FROM base UNION ALL SELECT scenario, segment_model, CAST(cost_usd AS DECIMAL(38,2)) AS cost_usd FROM per_prov WHERE array_contains(:param_sim_providers, target_provider) ORDER BY scenario, cost_usd DESC "
+        "WITH ref AS (SELECT * FROM perdomo_demos_catalog.ai_savings.v_model_ref WHERE on_databricks),\nbase AS (\n  SELECT destination_model, match_key, SUM(input_tokens) inp, SUM(output_tokens) outp,\n         SUM(cache_read_input_tokens) cread, SUM(cache_creation_input_tokens) cwrite,\n         CAST(SUM(cost_usd) AS DOUBLE) real_cost\n  FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily\n  WHERE (size(:param_workspace) = 0 OR array_contains(:param_workspace, workspace_name)) AND event_date BETWEEN :date_range.min AND :date_range.max AND (size(:param_models) = 0 OR array_contains(:param_models, destination_model))\n  GROUP BY 1, 2\n),\nra AS (SELECT b.*, ref.intelligence ri FROM base b JOIN ref ON b.match_key = ref.match_key),\nbase_named AS (\n  SELECT COALESCE(r.model, b.destination_model) segment_model, CAST(SUM(b.real_cost) AS DECIMAL(38,2)) cost_usd\n  FROM base b LEFT JOIN ref r ON b.match_key = r.match_key\n  GROUP BY COALESCE(r.model, b.destination_model)\n),\ncand AS (\n  SELECT ra.match_key, ra.inp, ra.outp, ra.cread, ra.cwrite, ep.provider target_provider, ep.model target_model,\n         ep.price_input pin, ep.price_output pout, ep.price_cache_read pcr, ep.price_cache_write pcw,\n         ROW_NUMBER() OVER (PARTITION BY ra.match_key, ep.provider ORDER BY ABS(ep.intelligence - ra.ri), ep.intelligence DESC) rn\n  FROM ra JOIN ref ep ON TRUE\n),\nper_prov AS (\n  SELECT concat('Só ', target_provider) scenario, target_provider, target_model segment_model,\n         SUM((GREATEST(inp - cread - cwrite, 0)*pin + cread*COALESCE(pcr,pin) + cwrite*COALESCE(pcw,pin) + outp*pout)/1e6) cost_usd\n  FROM cand WHERE rn = 1 GROUP BY target_provider, target_model\n)\nSELECT '0 · Mix atual (real Databricks)' AS scenario, segment_model, cost_usd FROM base_named\nUNION ALL\nSELECT scenario, segment_model, CAST(cost_usd AS DECIMAL(38,2)) FROM per_prov WHERE array_contains(:param_sim_providers, target_provider)\nORDER BY scenario, cost_usd DESC "
       ],
       "parameters": [
         {
@@ -379,7 +379,7 @@
       "name": "ds_provider_kpis",
       "displayName": "Provider único — cards",
       "queryLines": [
-        "WITH ref AS (SELECT * FROM perdomo_demos_catalog.ai_savings.v_model_ref WHERE on_databricks), real AS (   SELECT event_date, destination_model, SUM(input_tokens) inp, SUM(output_tokens) outp,          SUM(cache_read_input_tokens) cread, SUM(cache_creation_input_tokens) cwrite   FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily   WHERE (size(:param_workspace) = 0 OR array_contains(:param_workspace, workspace_name))     AND event_date BETWEEN :date_range.min AND :date_range.max     AND (size(:param_models) = 0 OR array_contains(:param_models, destination_model))   GROUP BY 1, 2 ), ra AS (SELECT r.*, ref.intelligence ri, ref.price_input pin, ref.price_output pout,               ref.price_cache_read pcr, ref.price_cache_write pcw        FROM real r JOIN ref ON r.destination_model = ref.slug_norm), equiv AS (SELECT destination_model, pi, po, pcr2, pcw2 FROM (     SELECT m.destination_model, ep.price_input pi, ep.price_output po,            ep.price_cache_read pcr2, ep.price_cache_write pcw2,            ROW_NUMBER() OVER (PARTITION BY m.destination_model                               ORDER BY ABS(ep.intelligence - m.ri), ep.intelligence DESC) rn     FROM (SELECT DISTINCT destination_model, ri FROM ra) m     JOIN ref ep ON ep.provider = :param_sim_provider) WHERE rn = 1) , dm AS (SELECT ra.destination_model,    (GREATEST(inp-cread-cwrite,0)*pin + cread*COALESCE(pcr,pin) + cwrite*COALESCE(pcw,pin) + outp*pout)/1e6 rc,    (GREATEST(inp-cread-cwrite,0)*e.pi + cread*COALESCE(e.pcr2,e.pi) + cwrite*COALESCE(e.pcw2,e.pi) + outp*e.po)/1e6 sc    FROM ra JOIN equiv e USING (destination_model)) SELECT CAST(SUM(rc) AS DECIMAL(38,2)) AS real_cost,        CAST(SUM(sc) AS DECIMAL(38,2)) AS sim_cost,        CAST(SUM(sc) - SUM(rc) AS DECIMAL(38,2)) AS savings FROM dm "
+        "WITH ref AS (SELECT * FROM perdomo_demos_catalog.ai_savings.v_model_ref WHERE on_databricks),\nbase AS (\n  SELECT destination_model, match_key, SUM(input_tokens) inp, SUM(output_tokens) outp,\n         SUM(cache_read_input_tokens) cread, SUM(cache_creation_input_tokens) cwrite,\n         CAST(SUM(cost_usd) AS DOUBLE) real_cost\n  FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily\n  WHERE (size(:param_workspace) = 0 OR array_contains(:param_workspace, workspace_name)) AND event_date BETWEEN :date_range.min AND :date_range.max AND (size(:param_models) = 0 OR array_contains(:param_models, destination_model))\n  GROUP BY 1, 2\n),\nra AS (SELECT b.*, ref.intelligence ri FROM base b JOIN ref ON b.match_key = ref.match_key),\nreal_tot AS (SELECT SUM(real_cost) real_cost FROM base),\nequiv AS (\n  SELECT match_key, pin, pout, pcr, pcw FROM (\n    SELECT m.match_key, ep.price_input pin, ep.price_output pout, ep.price_cache_read pcr, ep.price_cache_write pcw,\n           ROW_NUMBER() OVER (PARTITION BY m.match_key ORDER BY ABS(ep.intelligence - m.ri), ep.intelligence DESC) rn\n    FROM (SELECT DISTINCT match_key, ri FROM ra) m\n    JOIN ref ep ON ep.provider = :param_sim_provider\n  ) WHERE rn = 1\n),\nsim AS (\n  SELECT SUM((GREATEST(ra.inp - ra.cread - ra.cwrite, 0)*e.pin + ra.cread*COALESCE(e.pcr,e.pin) + ra.cwrite*COALESCE(e.pcw,e.pin) + ra.outp*e.pout)/1e6) sim_cost\n  FROM ra JOIN equiv e USING (match_key)\n)\nSELECT CAST((SELECT real_cost FROM real_tot) AS DECIMAL(38,2)) AS real_cost,\n       CAST((SELECT sim_cost FROM sim) AS DECIMAL(38,2)) AS sim_cost,\n       CAST((SELECT sim_cost FROM sim) - (SELECT real_cost FROM real_tot) AS DECIMAL(38,2)) AS savings "
       ],
       "parameters": [
         {
@@ -442,7 +442,7 @@
       "name": "ds_provider_daily",
       "displayName": "Provider único — diário",
       "queryLines": [
-        "WITH ref AS (SELECT * FROM perdomo_demos_catalog.ai_savings.v_model_ref WHERE on_databricks), real AS (   SELECT event_date, destination_model, SUM(input_tokens) inp, SUM(output_tokens) outp,          SUM(cache_read_input_tokens) cread, SUM(cache_creation_input_tokens) cwrite   FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily   WHERE (size(:param_workspace) = 0 OR array_contains(:param_workspace, workspace_name))     AND event_date BETWEEN :date_range.min AND :date_range.max     AND (size(:param_models) = 0 OR array_contains(:param_models, destination_model))   GROUP BY 1, 2 ), ra AS (SELECT r.*, ref.intelligence ri, ref.price_input pin, ref.price_output pout,               ref.price_cache_read pcr, ref.price_cache_write pcw        FROM real r JOIN ref ON r.destination_model = ref.slug_norm), equiv AS (SELECT destination_model, pi, po, pcr2, pcw2 FROM (     SELECT m.destination_model, ep.price_input pi, ep.price_output po,            ep.price_cache_read pcr2, ep.price_cache_write pcw2,            ROW_NUMBER() OVER (PARTITION BY m.destination_model                               ORDER BY ABS(ep.intelligence - m.ri), ep.intelligence DESC) rn     FROM (SELECT DISTINCT destination_model, ri FROM ra) m     JOIN ref ep ON ep.provider = :param_sim_provider) WHERE rn = 1) , dm AS (SELECT ra.event_date, ra.destination_model,    CAST((GREATEST(inp-cread-cwrite,0)*pin + cread*COALESCE(pcr,pin) + cwrite*COALESCE(pcw,pin) + outp*pout)/1e6 AS DECIMAL(38,2)) cost_usd,    (GREATEST(inp-cread-cwrite,0)*e.pi + cread*COALESCE(e.pcr2,e.pi) + cwrite*COALESCE(e.pcw2,e.pi) + outp*e.po)/1e6 sc    FROM ra JOIN equiv e USING (destination_model)), daily_sim AS (SELECT event_date, SUM(sc) day_sim FROM dm GROUP BY 1) SELECT dm.event_date, dm.destination_model, dm.cost_usd,        CAST(ds.day_sim AS DECIMAL(38,2)) AS sim_cost_usd FROM dm JOIN daily_sim ds USING (event_date) ORDER BY dm.event_date "
+        "WITH ref AS (SELECT * FROM perdomo_demos_catalog.ai_savings.v_model_ref WHERE on_databricks),\nbase AS (\n  SELECT event_date, destination_model, match_key, SUM(input_tokens) inp, SUM(output_tokens) outp,\n         SUM(cache_read_input_tokens) cread, SUM(cache_creation_input_tokens) cwrite,\n         CAST(SUM(cost_usd) AS DOUBLE) real_cost\n  FROM perdomo_demos_catalog.ai_savings.v_model_usage_daily\n  WHERE (size(:param_workspace) = 0 OR array_contains(:param_workspace, workspace_name)) AND event_date BETWEEN :date_range.min AND :date_range.max AND (size(:param_models) = 0 OR array_contains(:param_models, destination_model))\n  GROUP BY 1, 2, 3\n),\nra AS (SELECT b.*, ref.intelligence ri FROM base b JOIN ref ON b.match_key = ref.match_key),\nequiv AS (\n  SELECT match_key, pin, pout, pcr, pcw FROM (\n    SELECT m.match_key, ep.price_input pin, ep.price_output pout, ep.price_cache_read pcr, ep.price_cache_write pcw,\n           ROW_NUMBER() OVER (PARTITION BY m.match_key ORDER BY ABS(ep.intelligence - m.ri), ep.intelligence DESC) rn\n    FROM (SELECT DISTINCT match_key, ri FROM ra) m\n    JOIN ref ep ON ep.provider = :param_sim_provider\n  ) WHERE rn = 1\n),\nsim_dm AS (\n  SELECT ra.event_date, SUM((GREATEST(ra.inp - ra.cread - ra.cwrite, 0)*e.pin + ra.cread*COALESCE(e.pcr,e.pin) + ra.cwrite*COALESCE(e.pcw,e.pin) + ra.outp*e.pout)/1e6) sc\n  FROM ra JOIN equiv e USING (match_key) GROUP BY ra.event_date\n)\nSELECT b.event_date, b.destination_model,\n       CAST(b.real_cost AS DECIMAL(38,2)) AS cost_usd,\n       CAST(sd.sc AS DECIMAL(38,2)) AS sim_cost_usd\nFROM base b LEFT JOIN sim_dm sd ON b.event_date = sd.event_date\nORDER BY b.event_date "
       ],
       "parameters": [
         {
@@ -548,6 +548,61 @@
       "displayName": "ds_dim_providers_sim",
       "queryLines": [
         "SELECT DISTINCT provider FROM perdomo_demos_catalog.ai_savings.v_model_ref WHERE on_databricks AND provider IS NOT NULL ORDER BY provider "
+      ]
+    },
+    {
+      "name": "ds_cov_endpoints",
+      "displayName": "ds_cov_endpoints",
+      "queryLines": [
+        "WITH dbx AS (\n  SELECT DISTINCT endpoint_name, concat_ws('-', nullif(array_join(filter(split(lower(regexp_replace(trim(regexp_replace(endpoint_name, '^databricks-', '')), '[ ._]+', '-')),'-'), t -> NOT t rlike '^[0-9]+$'),'-'),''), nullif(array_join(filter(split(lower(regexp_replace(trim(regexp_replace(endpoint_name, '^databricks-', '')), '[ ._]+', '-')),'-'), t -> t rlike '^[0-9]+$'),'-'),'')) AS match_key\n  FROM system.serving.served_entities\n  WHERE task = 'llm/v1/chat' AND endpoint_delete_time IS NULL AND endpoint_name LIKE 'databricks-%'\n)\nSELECT endpoint_name, match_key\nFROM dbx WHERE match_key NOT IN (SELECT match_key FROM perdomo_demos_catalog.ai_savings.v_aa_model_ref)\nORDER BY endpoint_name "
+      ]
+    },
+    {
+      "name": "ds_cov_usage",
+      "displayName": "ds_cov_usage",
+      "queryLines": [
+        "SELECT destination_model,\n       CAST(SUM(cost_usd) AS DECIMAL(38,2)) AS cost_usd,\n       SUM(total_tokens) AS total_tokens\nFROM perdomo_demos_catalog.ai_savings.v_model_usage_daily\nWHERE (size(:param_workspace) = 0 OR array_contains(:param_workspace, workspace_name)) AND event_date BETWEEN :date_range.min AND :date_range.max AND (size(:param_models) = 0 OR array_contains(:param_models, destination_model))\n  AND match_key NOT IN (SELECT match_key FROM perdomo_demos_catalog.ai_savings.v_aa_model_ref)\nGROUP BY destination_model\nORDER BY cost_usd DESC "
+      ],
+      "parameters": [
+        {
+          "displayName": "date_range",
+          "keyword": "date_range",
+          "dataType": "DATE",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATE",
+              "min": {
+                "value": "now-30d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        },
+        {
+          "displayName": "param_workspace",
+          "keyword": "param_workspace",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING"
+            }
+          }
+        },
+        {
+          "displayName": "param_models",
+          "keyword": "param_models",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING"
+            }
+          }
+        }
       ]
     }
   ],
@@ -2659,6 +2714,131 @@
             "y": 12,
             "width": 4,
             "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "table_cov_endpoints",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_cov_endpoints",
+                  "fields": [
+                    {
+                      "name": "endpoint_name",
+                      "expression": "`endpoint_name`"
+                    },
+                    {
+                      "name": "match_key",
+                      "expression": "`match_key`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "endpoint_name",
+                    "displayName": "Endpoint servido (Databricks)"
+                  },
+                  {
+                    "fieldName": "match_key",
+                    "displayName": "match_key"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Modelos servidos sem referência na AA — fora das simulações"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 21,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "table_cov_usage",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_cov_usage",
+                  "fields": [
+                    {
+                      "name": "destination_model",
+                      "expression": "`destination_model`"
+                    },
+                    {
+                      "name": "cost_usd",
+                      "expression": "`cost_usd`"
+                    },
+                    {
+                      "name": "total_tokens",
+                      "expression": "`total_tokens`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "destination_model",
+                    "displayName": "Modelo consumido"
+                  },
+                  {
+                    "fieldName": "cost_usd",
+                    "displayName": "Custo real (USD)",
+                    "format": {
+                      "type": "number-currency",
+                      "currencyCode": "USD",
+                      "abbreviation": "compact",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 2
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "total_tokens",
+                    "displayName": "Tokens",
+                    "format": {
+                      "type": "number",
+                      "abbreviation": "compact",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 1
+                      }
+                    }
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Consumo real sem match na AA — excluído das comparações"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 21,
+            "width": 6,
+            "height": 6
           }
         }
       ],

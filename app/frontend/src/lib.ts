@@ -11,10 +11,14 @@ export type ModelRow = {
 
 export type TierBudget = { pct_alvo: number; pct_optimizable: number };
 
-export type OptimizedModel = {
-  tokens: number; cost: number; model: string; slug?: string;
-  provider?: string; intelligence?: number;
+export type Substitute = {
+  model: string; provider?: string; intelligence?: number; slug?: string;
 } | null;
+
+export type ModelDetail = {
+  model: string; slug: string; intelligence: number | null;
+  current_tokens: number; substitute: Substitute;
+};
 
 export type TierResult = {
   tier: "alta" | "media" | "baixa";
@@ -24,12 +28,8 @@ export type TierResult = {
   intelligence: number | null;
   pct_atual: number; pct_alvo: number; pct_optimizable: number;
   current: { tokens: number; cost: number };
-  target: {
-    tokens: number;
-    non_optimized: { tokens: number; cost: number; model: string | null };
-    optimized: OptimizedModel;
-    cost: number;
-  };
+  target: { tokens: number; cost: number };
+  models_detail: ModelDetail[];
 };
 
 export type Segment = {

@@ -1,14 +1,14 @@
 import { useRef } from "react";
 import type { ModelRow, ModelRef } from "./lib";
 
-// Colunas da grade. `num` marca colunas numéricas.
-const COLS: { key: keyof ModelRow; label: string; num: boolean; cache?: boolean }[] = [
+// Colunas da grade. `num` marca colunas numéricas. `hint` = tooltip com a convenção.
+const COLS: { key: keyof ModelRow; label: string; num: boolean; cache?: boolean; hint?: string }[] = [
   { key: "model", label: "Modelo", num: false },
-  { key: "input", label: "Input", num: true },
+  { key: "input", label: "Input", num: true, hint: "Tokens de entrada SEM cache (cache read/write são colunas à parte, somadas)." },
   { key: "output", label: "Output", num: true },
-  { key: "cache_read", label: "Cache read", num: true, cache: true },
-  { key: "cache_write", label: "Cache write", num: true, cache: true },
-  { key: "spend_usd", label: "Valor gasto (US$)", num: true },
+  { key: "cache_read", label: "Cache read", num: true, cache: true, hint: "Tokens lidos do cache — aditivo ao input (convenção Anthropic/OpenAI)." },
+  { key: "cache_write", label: "Cache write", num: true, cache: true, hint: "Tokens de escrita/criação de cache — aditivo ao input." },
+  { key: "spend_usd", label: "Valor gasto (US$)", num: true, hint: "Âncora informativa: não entra no cálculo (o custo é reprecificado a preço de lista AA)." },
 ];
 
 export function emptyRow(): ModelRow {
@@ -37,6 +37,8 @@ type Props = {
 export function Grid({ rows, onChange, cacheApplies, models }: Props) {
   const cols = COLS.filter((c) => !c.cache || cacheApplies);
   const gridRef = useRef<HTMLDivElement>(null);
+  // sinal de convenção errada: input COM cache embutido (estilo gateway) contaria em dobro
+  const cacheDoubleCount = cacheApplies && rows.some((r) => r.input > 0 && r.cache_read + r.cache_write > r.input);
 
   const setCell = (r: number, key: keyof ModelRow, value: string) => {
     const next = rows.map((row) => ({ ...row }));
@@ -79,7 +81,7 @@ export function Grid({ rows, onChange, cacheApplies, models }: Props) {
     <div className="grid-wrap" ref={gridRef}>
       <div className="grid" style={{ gridTemplateColumns: `1.6fr repeat(${cols.length - 1}, 1fr) 34px` }}>
         {cols.map((c) => (
-          <div key={c.key} className={`gcell ghead ${c.num ? "gnum" : ""}`}>{c.label}</div>
+          <div key={c.key} className={`gcell ghead ${c.num ? "gnum" : ""}`} title={c.hint}>{c.label}</div>
         ))}
         <div className="gcell ghead" />
         {rows.map((row, r) =>
@@ -98,6 +100,16 @@ export function Grid({ rows, onChange, cacheApplies, models }: Props) {
         <button className="btn ghost" onClick={clearAll}>Limpar</button>
         <span className="note">Dica: cole (Ctrl+V / Cmd+V) direto de uma planilha para preencher várias linhas.</span>
       </div>
+      <p className="note grid-conv">
+        Convenção: <b>Input</b> é a entrada <b>sem</b> cache; <b>cache read/write</b> entram à parte (somados),
+        como na fatura da Anthropic/OpenAI — não cole números do gateway (que já embutem cache no input).
+      </p>
+      {cacheDoubleCount && (
+        <p className="note" style={{ color: "#b4232c" }}>
+          Atenção: em alguma linha o cache excede o input — confira se não colou o input <b>com</b> cache
+          embutido (isso contaria os tokens de cache em dobro).
+        </p>
+      )}
     </div>
   );
 }
