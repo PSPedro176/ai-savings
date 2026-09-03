@@ -14,16 +14,13 @@ env:
   - name: MODEL_REF_VIEW
     value: "perdomo_demos_catalog.ai_savings.model_ref_snapshot"
 
-  # Conexão Lakebase: PG* são injetados pelo binding `lakebase` (resources/app.yml).
-  # A senha é gerada em runtime (server/db.py); PGUSER cai para o client id do SP.
-  - name: PGHOST
-    valueFrom: lakebase
-  - name: PGPORT
+  # Conexão Lakebase (Autoscaling). O binding `lakebase` (resources/app.yml) NÃO decompõe
+  # host/port/user — o `valueFrom` resolve para o *resource path* do endpoint. Então:
+  #   - LAKEBASE_ENDPOINT_PATH = o path (adapta ao branch do target);
+  #   - o app deriva host via GET /api/2.0/postgres/<path> e a senha via
+  #     POST /api/2.0/postgres/credentials (server/db.py); porta fixa 5432;
+  #   - PGUSER cai para o client id do SP.
+  - name: LAKEBASE_ENDPOINT_PATH
     valueFrom: lakebase
   - name: PGDATABASE
-    valueFrom: lakebase
-  - name: PGUSER
-    valueFrom: lakebase
-  # Endpoint do Lakebase para gerar a database credential (branch = target).
-  - name: LAKEBASE_ENDPOINT_PATH
-    value: "projects/ai-savings/branches/dev/endpoints/primary"
+    value: "ai_savings"

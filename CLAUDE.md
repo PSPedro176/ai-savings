@@ -112,10 +112,16 @@ Duas abas: **Estimar economia** (o fluxo) e **Acompanhar economia** (embed do da
 
 ### Deploy do app (DABs) — Lakebase 100% no bundle
 - `resources/app.yml` (recurso `apps`) + `resources/lakebase.yml` (Lakebase Autoscaling:
-  `postgres_projects/branches/endpoints/databases`) + `app/app.yaml` (env; PG* via binding).
+  `postgres_projects/branches/endpoints/databases`) + `app/app.yaml` (env).
 - **Lakebase Autoscaling É endereçável no DAB** via os resources `postgres_*` (o que NÃO existe
   como resource é o CDF). O app binda o banco por `app.resources[].postgres` = `{branch, database,
-  permission: CAN_CONNECT_AND_CREATE}` → injeta PGHOST/PGPORT/PGDATABASE/PGUSER e dá acesso ao SP.
+  permission: CAN_CONNECT_AND_CREATE}` (dá acesso ao SP).
+- **Conexão (importante):** o binding autoscaling **NÃO decompõe** host/port/user — `valueFrom: lakebase`
+  resolve para o *resource path* do endpoint (`projects/.../branches/<target>/endpoints/primary`).
+  Então `app.yaml` só seta `LAKEBASE_ENDPOINT_PATH: valueFrom: lakebase` (+ `PGDATABASE: ai_savings`);
+  o app (`server/db.py`) deriva o **host** via `GET /api/2.0/postgres/<path>` (`status.hosts.host`),
+  usa **porta fixa 5432** e **PGUSER** = client id do SP. (Setar PGHOST/PGPORT via `valueFrom` quebra:
+  todos recebem o path e `int(PGPORT)` estoura.)
 - Senha do Postgres: *database credential* gerada em runtime (`POST /api/2.0/postgres/credentials`
   com o endpoint da branch do target — env `LAKEBASE_ENDPOINT_PATH`).
 - Tabela `estimates`: criada pelo **app no startup** (idempotente, `server/db.py`); como o SP tem
