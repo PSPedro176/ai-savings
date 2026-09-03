@@ -1,0 +1,39 @@
+# =============================================================================
+# Lakebase Autoscaling — infra do app "AI Savings" (Fase 2), declarada no bundle.
+# Modelo hierárquico: Project > Branch > Endpoint > Database. Uma branch por target
+# (var.lakebase_branch) isola os dados. O app conecta via binding (resources/app.yml).
+# =============================================================================
+resources:
+  postgres_projects:
+    lb_project:
+      project_id: ai-savings
+      display_name: "AI Savings"
+
+  postgres_branches:
+    lb_branch:
+      parent: ${resources.postgres_projects.lb_project.name}
+      branch_id: ${var.lakebase_branch}
+      no_expiry: true
+
+  postgres_endpoints:
+    lb_endpoint:
+      parent: ${resources.postgres_branches.lb_branch.name}
+      endpoint_id: primary
+      endpoint_type: ENDPOINT_TYPE_READ_WRITE
+      autoscaling_limit_min_cu: 0.5
+      autoscaling_limit_max_cu: 2.0
+
+  # Role dono do database (genérico, sem identidade Databricks). O SP do app NÃO precisa
+  # ser dono do banco: conecta via binding (CAN_CONNECT_AND_CREATE) e cria/possui a tabela.
+  postgres_roles:
+    lb_owner:
+      parent: ${resources.postgres_branches.lb_branch.name}
+      role_id: app-owner
+      postgres_role: app_owner
+
+  postgres_databases:
+    lb_database:
+      parent: ${resources.postgres_branches.lb_branch.name}
+      database_id: ai-savings
+      postgres_database: ai_savings
+      role: ${resources.postgres_roles.lb_owner.name}

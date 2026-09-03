@@ -106,19 +106,26 @@ Duas abas: **Estimar economia** (o fluxo) e **Acompanhar economia** (embed do da
   via `system.serving.served_entities`, endpoints `databricks-*` chat ativos; casa por slug).
 - **`perdomo_demos_catalog.ai_savings.model_ref_snapshot`**: CTAS de `v_model_ref` (o app lê a
   TABELA, não a view, para o SP não precisar de acesso a system tables). Job recria no refresh.
-- **Lakebase** (autoscaling, project `ai-savings`, db `ai_savings`): tabela `estimates` (JSONB).
-  Schema em `app/db/schema.sql`; init via `app/scripts/init_lakebase.py`.
+- **Lakebase** (autoscaling, project `ai-savings`, branch por target, db `ai_savings`): tabela
+  `estimates` (JSONB). Declarado no bundle (`resources/lakebase.yml`); schema em `app/db/schema.sql`
+  criado pelo app no startup (`server/db.py`, idempotente).
 
-### Deploy do app (DABs) — armadilhas importantes
-- `resources/app.yml` (recurso `apps`) + `app/app.yaml` (env estático: WAREHOUSE_ID, PG*).
-- **Lakebase autoscaling NÃO é endereçável como app database resource** (só DatabaseInstance do
-  tier provisioned). Conexão via *database credential* gerada em runtime: `POST
-  /api/2.0/postgres/credentials` com `{"endpoint": "<path>"}` (NÃO o token OAuth genérico).
-- **Role Postgres do SP**: criar via `databricks postgres create-role` com
-  `identity_type=SERVICE_PRINCIPAL, auth_method=LAKEBASE_OAUTH_V1` — `CREATE ROLE` manual NÃO é
-  reconhecido no login federado. Script: `app/scripts/setup_app_lakebase.sh <APP> <PROFILE>`.
-- Grants UC ao SP: USE CATALOG/SCHEMA + SELECT em `model_ref_snapshot` (feito no setup).
-- Fluxo: `bundle deploy` → `bundle run ai_savings_app` → `setup_app_lakebase.sh` (1x).
+### Deploy do app (DABs) — Lakebase 100% no bundle
+- `resources/app.yml` (recurso `apps`) + `resources/lakebase.yml` (Lakebase Autoscaling:
+  `postgres_projects/branches/endpoints/databases`) + `app/app.yaml` (env; PG* via binding).
+- **Lakebase Autoscaling É endereçável no DAB** via os resources `postgres_*` (o que NÃO existe
+  como resource é o CDF). O app binda o banco por `app.resources[].postgres` = `{branch, database,
+  permission: CAN_CONNECT_AND_CREATE}` → injeta PGHOST/PGPORT/PGDATABASE/PGUSER e dá acesso ao SP.
+- Senha do Postgres: *database credential* gerada em runtime (`POST /api/2.0/postgres/credentials`
+  com o endpoint da branch do target — env `LAKEBASE_ENDPOINT_PATH`).
+- Tabela `estimates`: criada pelo **app no startup** (idempotente, `server/db.py`); como o SP tem
+  CAN_CONNECT_AND_CREATE, ele vira **dono** da tabela → read/write sem grant extra.
+- Referência `model_ref_snapshot` (CTAS de `v_model_ref`) recriada pela task `create_model_ref_snapshot`
+  do job `leaderboard`; SELECT ao SP via `app.resources[].uc_securable` (dispensa GRANT manual).
+- **Fluxo de deploy**: `bundle deploy -t dev` → `bundle run leaderboard -t dev` (views + snapshot)
+  → `bundle run ai_savings_app -t dev` (sobe o app). Sem scripts manuais.
+- `app/scripts/{init_lakebase,setup_app_lakebase,grant_app_sp}` ficam como referência/fallback,
+  fora do fluxo de deploy (o bundle + startup do app cobrem tudo).
 - **Embed da aba de acompanhamento** exige habilitar *embedding de dashboards AI/BI* no workspace
   (config de admin); sem isso, mostra fallback "Abrir no Databricks" (comportamento esperado).
 

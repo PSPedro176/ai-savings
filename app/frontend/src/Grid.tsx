@@ -37,8 +37,6 @@ type Props = {
 export function Grid({ rows, onChange, cacheApplies, models }: Props) {
   const cols = COLS.filter((c) => !c.cache || cacheApplies);
   const gridRef = useRef<HTMLDivElement>(null);
-  // sinal de convenção errada: input COM cache embutido (estilo gateway) contaria em dobro
-  const cacheDoubleCount = cacheApplies && rows.some((r) => r.input > 0 && r.cache_read + r.cache_write > r.input);
 
   const setCell = (r: number, key: keyof ModelRow, value: string) => {
     const next = rows.map((row) => ({ ...row }));
@@ -101,15 +99,10 @@ export function Grid({ rows, onChange, cacheApplies, models }: Props) {
         <span className="note">Dica: cole (Ctrl+V / Cmd+V) direto de uma planilha para preencher várias linhas.</span>
       </div>
       <p className="note grid-conv">
-        Convenção: <b>Input</b> é a entrada <b>sem</b> cache; <b>cache read/write</b> entram à parte (somados),
-        como na fatura da Anthropic/OpenAI — não cole números do gateway (que já embutem cache no input).
+        Convenção (Anthropic/OpenAI): os quatro campos são <b>independentes e somados</b>. <b>Input</b> = entrada
+        <b> não-cacheada</b>; <b>cache read</b> e <b>cache write</b> são baldes à parte. Não há relação fixa entre eles
+        (cache read costuma ser bem maior que write, e pode exceder o input).
       </p>
-      {cacheDoubleCount && (
-        <p className="note" style={{ color: "#b4232c" }}>
-          Atenção: em alguma linha o cache excede o input — confira se não colou o input <b>com</b> cache
-          embutido (isso contaria os tokens de cache em dobro).
-        </p>
-      )}
     </div>
   );
 }

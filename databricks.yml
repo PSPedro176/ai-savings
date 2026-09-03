@@ -26,6 +26,9 @@ variables:
   dashboard_parent:
     description: Pasta do workspace onde a dashboard é publicada
     default: /Workspace/Shared/dashboards
+  lakebase_branch:
+    description: Branch do Lakebase Autoscaling usada pelo target (isola os dados)
+    default: production
 
 targets:
   dev:
@@ -36,6 +39,7 @@ targets:
     variables:
       catalog: perdomo_demos_catalog
       dashboard_parent: /Workspace/Users/${workspace.current_user.userName}/dashboards
+      lakebase_branch: dev
 
   prod:
     mode: production

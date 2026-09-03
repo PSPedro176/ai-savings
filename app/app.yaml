@@ -7,17 +7,23 @@ command:
   - "--port"
   - "8000"
 
-# Env estático (evita depender de bindings de resource p/ Lakebase autoscaling).
-# O service principal do app precisa de: CAN_USE no warehouse + role de acesso ao Lakebase.
-# PGUSER é derivado no código (DATABRICKS_CLIENT_ID) quando não setado aqui.
 env:
+  # Referência de modelos (lida via SQL Warehouse).
   - name: WAREHOUSE_ID
     value: "8edbc02ddff2de2d"
   - name: MODEL_REF_VIEW
     value: "perdomo_demos_catalog.ai_savings.model_ref_snapshot"
+
+  # Conexão Lakebase: PG* são injetados pelo binding `lakebase` (resources/app.yml).
+  # A senha é gerada em runtime (server/db.py); PGUSER cai para o client id do SP.
   - name: PGHOST
-    value: "ep-cool-dream-d1hlqscs.database.us-west-2.cloud.databricks.com"
+    valueFrom: lakebase
   - name: PGPORT
-    value: "5432"
+    valueFrom: lakebase
   - name: PGDATABASE
-    value: "ai_savings"
+    valueFrom: lakebase
+  - name: PGUSER
+    valueFrom: lakebase
+  # Endpoint do Lakebase para gerar a database credential (branch = target).
+  - name: LAKEBASE_ENDPOINT_PATH
+    value: "projects/ai-savings/branches/dev/endpoints/primary"
