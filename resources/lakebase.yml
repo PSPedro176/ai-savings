@@ -8,6 +8,10 @@ resources:
     lb_project:
       project_id: ai-savings
       display_name: "AI Savings"
+      # Projeto NÃO suporta replace_existing. purge_on_delete faz o `bundle destroy`
+      # apagar de vez (sem soft-delete de 7 dias), senão o nome fica reservado e o
+      # próximo deploy falha com "a project with this resource name already exists".
+      purge_on_delete: true
 
   postgres_branches:
     lb_branch:
@@ -15,6 +19,7 @@ resources:
       branch_id: ${var.lakebase_branch}
       no_expiry: true
       replace_existing: true
+      purge_on_delete: true
 
   # A branch já auto-cria um endpoint `primary` read-write; assumimos ele (replace_existing)
   # para aplicar os limites de autoscaling em vez de falhar com "already exists".
