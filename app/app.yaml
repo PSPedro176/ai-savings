@@ -1,0 +1,26 @@
+# Config do Databricks App: sobe o FastAPI (serve a API + o SPA em frontend/dist).
+command:
+  - "uvicorn"
+  - "app:app"
+  - "--host"
+  - "0.0.0.0"
+  - "--port"
+  - "8000"
+
+env:
+  # Referência de modelos (lida via SQL Warehouse).
+  - name: WAREHOUSE_ID
+    value: "8edbc02ddff2de2d"
+  - name: MODEL_REF_VIEW
+    value: "perdomo_demos_catalog.ai_savings.model_ref_snapshot"
+
+  # Conexão Lakebase (Autoscaling). O binding `lakebase` (resources/app.yml) NÃO decompõe
+  # host/port/user — o `valueFrom` resolve para o *resource path* do endpoint. Então:
+  #   - LAKEBASE_ENDPOINT_PATH = o path (adapta ao branch do target);
+  #   - o app deriva host via GET /api/2.0/postgres/<path> e a senha via
+  #     POST /api/2.0/postgres/credentials (server/db.py); porta fixa 5432;
+  #   - PGUSER cai para o client id do SP.
+  - name: LAKEBASE_ENDPOINT_PATH
+    valueFrom: lakebase
+  - name: PGDATABASE
+    value: "ai_savings"

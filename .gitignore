@@ -3,3 +3,7 @@ __pycache__/
 .databricks/
 .databricks-*
 .isaac/
+.shots/
+app/frontend/node_modules/
+.venv/
+.pytest_cache/

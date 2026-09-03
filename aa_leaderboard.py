@@ -164,7 +164,7 @@ print(f"Snapshot de {len(rows)} modelos inserido em {target_table}")
 
 # COMMAND ----------
 
-REQUIRED_VIEWS = {"v_model_usage_daily", "v_aa_model_ref"}
+REQUIRED_VIEWS = {"v_model_usage_daily", "v_aa_model_ref", "v_model_ref"}
 existing_views = {
     r.viewName for r in spark.sql(f"SHOW VIEWS IN {catalog}.{schema}").collect()
 }

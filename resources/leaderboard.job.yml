@@ -10,8 +10,7 @@ resources:
         pause_status: UNPAUSED
 
       tasks:
-        # 1) Coleta o leaderboard da AA, cria o schema/tabela e sinaliza (task value
-        #    create_needed) se as views ainda não existem.
+        # 1) Coleta o leaderboard da AA e (re)cria o schema/tabela aa_leaderboard.
         - task_key: refresh_leaderboard
           # Sem cluster declarado => roda em compute serverless.
           notebook_task:
@@ -23,20 +22,11 @@ resources:
               secret_scope: ${var.secret_scope}
               secret_key: ${var.secret_key}
 
-        # 2) Gate: só cria as views quando alguma delas não existe (1ª execução pós-deploy).
-        - task_key: views_missing
-          depends_on:
-            - task_key: refresh_leaderboard
-          condition_task:
-            left: "{{tasks.refresh_leaderboard.values.create_needed}}"
-            op: EQUAL_TO
-            right: "true"
-
-        # 3) Cria as duas views EM PARALELO (ambas só dependem do gate = true).
+        # 2) Views (CREATE OR REPLACE, idempotentes) — recriadas em TODO run para aplicar
+        #    a definição atual do repo (sem gate: o gate antigo pulava atualizações).
         - task_key: create_v_model_usage_daily
           depends_on:
-            - task_key: views_missing
-              outcome: "true"
+            - task_key: refresh_leaderboard
           sql_task:
             warehouse_id: ${var.warehouse_id}
             file:
@@ -45,10 +35,29 @@ resources:
 
         - task_key: create_v_aa_model_ref
           depends_on:
-            - task_key: views_missing
-              outcome: "true"
+            - task_key: refresh_leaderboard
           sql_task:
             warehouse_id: ${var.warehouse_id}
             file:
               path: ../ddl/v_aa_model_ref.sql
+              source: WORKSPACE
+
+        # 3) v_model_ref (AA + disponibilidade Databricks) — depende de v_aa_model_ref.
+        - task_key: create_v_model_ref
+          depends_on:
+            - task_key: create_v_aa_model_ref
+          sql_task:
+            warehouse_id: ${var.warehouse_id}
+            file:
+              path: ../ddl/v_model_ref.sql
+              source: WORKSPACE
+
+        # 4) Materializa a referência (CTAS de v_model_ref) que o app lê via warehouse.
+        - task_key: create_model_ref_snapshot
+          depends_on:
+            - task_key: create_v_model_ref
+          sql_task:
+            warehouse_id: ${var.warehouse_id}
+            file:
+              path: ../ddl/model_ref_snapshot.sql
               source: WORKSPACE

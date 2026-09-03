@@ -1,0 +1,28 @@
+resources:
+  apps:
+    ai_savings_app:
+      name: "ai-savings-${bundle.target}"
+      description: "Calculadora de economia potencial em IA (Fase 2)"
+      source_code_path: ../app
+
+      # Resources do app (tudo pelo bundle — sem scripts manuais de role/grant):
+      resources:
+        # Warehouse que serve a referência de modelos (model_ref_snapshot).
+        - name: sql-warehouse
+          sql_warehouse:
+            id: ${var.warehouse_id}
+            permission: CAN_USE
+
+        # Lakebase Autoscaling: o SP conecta e cria objetos (vira dono da tabela estimates).
+        - name: lakebase
+          postgres:
+            branch: ${resources.postgres_branches.lb_branch.name}
+            database: ${resources.postgres_databases.lb_database.name}
+            permission: CAN_CONNECT_AND_CREATE
+
+        # Acesso UC de leitura à tabela de referência (dispensa GRANT manual ao SP).
+        - name: model-ref
+          uc_securable:
+            securable_full_name: ${var.catalog}.${var.schema}.model_ref_snapshot
+            securable_type: TABLE
+            permission: SELECT

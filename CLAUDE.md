@@ -1,8 +1,8 @@
 # ai-savings — estado do projeto
 
-Ferramenta para estimar **economia potencial em IA** de clientes Databricks. Hoje: um
-dashboard AI/BI (Lakeview) deployado via DABs. Próximo: um **app** (calculadora de economia)
-reutilizando a mesma camada de dados.
+Ferramenta para estimar **economia potencial em IA** de clientes Databricks. Duas entregas:
+(1) dashboard AI/BI (Lakeview) sobre system tables — Fase 1; (2) **App Databricks** (calculadora
+de economia, React+FastAPI) que o cliente usa em self-service com o consumo que ELE traz — Fase 2.
 
 ## Ambiente
 
@@ -77,6 +77,63 @@ Wording: usar **"comparar/comparação"**, não "simular/simulação".
 - **Job `leaderboard`** centraliza o setup: coleta a AA → condition task `views_missing`
   (task value `create_needed` setado por `aa_leaderboard.py`) → cria as 2 views EM PARALELO
   só se faltarem. Fluxo: deploy → roda o job 1x → tudo pronto; depois roda semanal só coletando.
+
+## App calculadora (Fase 2, `app/`) — React + FastAPI, um serviço
+
+Deploy dev no ar: `https://ai-savings-dev-7474652474621326.aws.databricksapps.com`.
+Duas abas: **Estimar economia** (o fluxo) e **Acompanhar economia** (embed do dashboard da Fase 1).
+
+- **Backend** (`app/server/`): `engine.py` = motor de cálculo puro (testado em `app/tests/`);
+  `model_ref.py` lê a referência de modelos via warehouse; `db.py` conecta ao Lakebase;
+  rotas em `routes/` (reference, estimate, dashboard). `config.py` faz auth dual-mode
+  (WorkspaceClient no App / profile `perdomo` local).
+- **Frontend** (`app/frontend/`, Vite+React+TS): identidade Databricks tema claro (ver
+  `.impeccable.md`). Fluxo em 3 passos: provider → grade colável de consumo → orçamento
+  (tiers Alta/Média/Baixa) + gráfico comparativo (2 colunas de tokens/US$, fitas ligando tiers,
+  segmentos otimizados em Lava, toggle, título dinâmico). Build em `frontend/dist` (servido
+  pelo FastAPI). Sem LLM — a sugestão OSS é lookup determinístico.
+
+### Motor de cálculo (semântica confirmada — o coração do app)
+- Distribuição em **tokens**; ambas as colunas a **preço de lista AA** (isola o efeito do
+  rebalanceamento + otimização). Gasto US$ digitado = só âncora.
+- 4 campos de token **independentes e aditivos** (faturamento Anthropic/OpenAI), ≠ da Fase 1.
+- Tier por bandas de `intelligence` (Alta ≥50, Média 28–50, Baixa <28 — em `engine.py`).
+- **% alvo** = rebalancear tokens entre tiers (fatia não-otimizada fica nos modelos do cliente);
+  **% otimizável** = trocar por modelo equivalente mais barato **disponível na Databricks**.
+
+### Camada de dados nova
+- **`ddl/v_model_ref.sql`**: `v_aa_model_ref` + disponibilidade Databricks (`on_databricks`,
+  via `system.serving.served_entities`, endpoints `databricks-*` chat ativos; casa por slug).
+- **`perdomo_demos_catalog.ai_savings.model_ref_snapshot`**: CTAS de `v_model_ref` (o app lê a
+  TABELA, não a view, para o SP não precisar de acesso a system tables). Job recria no refresh.
+- **Lakebase** (autoscaling, project `ai-savings`, branch por target, db `ai_savings`): tabela
+  `estimates` (JSONB). Declarado no bundle (`resources/lakebase.yml`); schema em `app/db/schema.sql`
+  criado pelo app no startup (`server/db.py`, idempotente).
+
+### Deploy do app (DABs) — Lakebase 100% no bundle
+- `resources/app.yml` (recurso `apps`) + `resources/lakebase.yml` (Lakebase Autoscaling:
+  `postgres_projects/branches/endpoints/databases`) + `app/app.yaml` (env).
+- **Lakebase Autoscaling É endereçável no DAB** via os resources `postgres_*` (o que NÃO existe
+  como resource é o CDF). O app binda o banco por `app.resources[].postgres` = `{branch, database,
+  permission: CAN_CONNECT_AND_CREATE}` (dá acesso ao SP).
+- **Conexão (importante):** o binding autoscaling **NÃO decompõe** host/port/user — `valueFrom: lakebase`
+  resolve para o *resource path* do endpoint (`projects/.../branches/<target>/endpoints/primary`).
+  Então `app.yaml` só seta `LAKEBASE_ENDPOINT_PATH: valueFrom: lakebase` (+ `PGDATABASE: ai_savings`);
+  o app (`server/db.py`) deriva o **host** via `GET /api/2.0/postgres/<path>` (`status.hosts.host`),
+  usa **porta fixa 5432** e **PGUSER** = client id do SP. (Setar PGHOST/PGPORT via `valueFrom` quebra:
+  todos recebem o path e `int(PGPORT)` estoura.)
+- Senha do Postgres: *database credential* gerada em runtime (`POST /api/2.0/postgres/credentials`
+  com o endpoint da branch do target — env `LAKEBASE_ENDPOINT_PATH`).
+- Tabela `estimates`: criada pelo **app no startup** (idempotente, `server/db.py`); como o SP tem
+  CAN_CONNECT_AND_CREATE, ele vira **dono** da tabela → read/write sem grant extra.
+- Referência `model_ref_snapshot` (CTAS de `v_model_ref`) recriada pela task `create_model_ref_snapshot`
+  do job `leaderboard`; SELECT ao SP via `app.resources[].uc_securable` (dispensa GRANT manual).
+- **Fluxo de deploy**: `bundle deploy -t dev` → `bundle run leaderboard -t dev` (views + snapshot)
+  → `bundle run ai_savings_app -t dev` (sobe o app). Sem scripts manuais.
+- `app/scripts/{init_lakebase,setup_app_lakebase,grant_app_sp}` ficam como referência/fallback,
+  fora do fluxo de deploy (o bundle + startup do app cobrem tudo).
+- **Embed da aba de acompanhamento** exige habilitar *embedding de dashboards AI/BI* no workspace
+  (config de admin); sem isso, mostra fallback "Abrir no Databricks" (comportamento esperado).
 
 ## Limitações conhecidas / próximos
 

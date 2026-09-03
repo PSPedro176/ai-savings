@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# Node
+frontend/node_modules/
+npm-debug.log*
+
+# MANTER frontend/dist no deploy (é o build servido pelo FastAPI) — não ignorar.
+frontend/tsconfig.tsbuildinfo
