@@ -63,6 +63,14 @@ Fluxo centralizado — depois disto o job roda sozinho e o dashboard fica pronto
 5. **Abra o dashboard.** Nas próximas execuções semanais o job só coleta o snapshot; as
    tasks de DDL são puladas porque as views já existem (condition task `views_missing`).
 
+6. **Deploy do app calculadora (Fase 2).** Além do dashboard, o repositório traz um
+   **Databricks App** (calculadora de economia, `app/`) que **precisa ser deployado à parte** —
+   ele não sobe junto com o dashboard. Depois do `bundle deploy`, suba o app:
+
+   ```bash
+   databricks bundle run ai_savings_app --target dev --profile <PROFILE>
+   ```
+
 > As views e o dashboard usam o catálogo/schema **fully-qualified** no código. Se mudar o
 > destino, ajuste o topo dos arquivos em `ddl/` **e** os datasets do `ai_savings.lvdash.json`
 > (o DABs não substitui variável dentro do JSON do dashboard).
